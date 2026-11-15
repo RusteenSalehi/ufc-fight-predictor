@@ -218,3 +218,24 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Project-specific ---
+# Data, models, and generated outputs
+data/
+models/
+artifacts/
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Secrets (allow committing a template)
+.env
+.env.*
+!.env.example
+
+# JetBrains IDE (local workspace config)
+.idea/
+
+# Tool caches (uv venv and ruff cache are covered above as .venv and .ruff_cache/)
+.uv-cache/
