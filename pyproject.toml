@@ -1,0 +1,26 @@
+[project]
+name = "ufc-fight-predictor"
+version = "0.1.0"
+description = "UFC fight outcome prediction"
+authors = [
+    { name = "Rusteen Salehi", email = "RusteenSalehi1@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "lightgbm>=4.7.0",
+    "lxml>=6.1.3",
+    "numpy>=2.5.4",
+    "pandas>=3.1.1",
+    "requests>=2.34.2",
+    "scikit-learn>=1.9.1",
+    "shap>=0.54.1",
+    "xgboost>=3.4.1",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.7.0",
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
