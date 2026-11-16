@@ -3,10 +3,10 @@
 ## Overview
 
 ```
-ufcstats.com
-    |  polite scraper (1 req/s, raw HTML cache)
+published dataset on GitHub (CSV, derived from ufcstats.com)
+    |  fetch, pinned to a commit (7 requests)
     v
-raw HTML cache (data/raw)  ->  parsers  ->  SQLite (ufc.db)
+snapshot (data/external/greco)  ->  transform + validation gate  ->  SQLite (ufc.db)
                                                |
                                                v
                                 as-of feature builder
@@ -32,33 +32,69 @@ Core principle: predictions are precomputed in batch. Page views read static JSO
 
 ## Data source
 
-UFCStats.com is the primary source. Page types:
-- Completed events list and upcoming events list
-- Event page: bouts on the card
-- Fight details page: per-fight, per-fighter stats (totals and significant strikes by target and position), method, round, time
-- Fighter page: physical attributes and career aggregates
+### Completed fights: a published dataset, not a scraper
 
-Only physical attributes (height, reach, stance, date of birth) are taken from fighter pages. Career aggregates on fighter pages reflect today's values and are never used for training.
+UFCStats.com serves every page behind a JavaScript proof-of-work "Checking your browser" challenge, and this project does not solve or work around it (see DECISIONS D13). Historical data therefore comes from the CSV files published at https://github.com/Greco1899/scrape_ufc_stats, which that project collects from UFCStats and refreshes daily. Terms-of-use caveats are in DECISIONS D15.
 
-Stable IDs come from UFCStats URLs (each event, fight, and fighter has a hex ID). Names are display data only.
+| File | Grain | Key it carries |
+|---|---|---|
+| `ufc_event_details.csv` | one row per event: name, date, location | event URL |
+| `ufc_fight_details.csv` | one row per fight: event name, bout text | fight URL |
+| `ufc_fight_results.csv` | one row per fight: outcome, weight class, method, round, time, format, referee | fight URL |
+| `ufc_fight_stats.csv` | one row per fighter per round: totals and significant strikes by target and position | none (event name, bout text, fighter name) |
+| `ufc_fighter_details.csv` | one row per fighter: current name, nickname | fighter URL |
+| `ufc_fighter_tott.csv` | one row per fighter: height, weight, reach, stance, date of birth | fighter URL |
+
+Stable IDs are the 16-character hex IDs in those UFCStats URLs. URLs are parsed for their IDs and never requested. Names are display data, with one exception forced by the dataset: a fight row names its two fighters as text only, so fighter IDs on bouts are resolved from names (below).
+
+The dataset holds no career aggregates, and none are stored. Only physical attributes (height, reach, stance, date of birth) are taken from fighter profiles.
+
+### Ingestion (`src/ufc/ingest/`)
+
+```
+uv run python -m ufc.ingest fetch     # download the snapshot, pinned to a commit, with SHA-256 per file
+uv run python -m ufc.ingest load      # validate, then load data/ufc.db
+```
+
+1. **Fetch** resolves the upstream branch to a commit, downloads the six files to a staging directory, checks their columns, and only then replaces the previous snapshot. `SOURCE.json` records the commit.
+2. **Transform** (pure functions) parses every cell and performs the joins the files leave to text:
+   - fight to event, by event name;
+   - stats to fight, by event name and bout text;
+   - fighter name to fighter ID, by rule: an explicit override in `identity_overrides.csv`; else a name belonging to exactly one profile; else, for a shared name, the one profile whose listed weight fits the bout's weight class. No fuzzy matching.
+   - Anything that cannot be joined with certainty is dropped and reported, never guessed.
+3. **Validate** checks row counts, duplicate IDs, references, fighters without bouts, date and age sanity, results breakdown, and stat arithmetic.
+4. **Gate**: if validation finds structural errors or more than 1% of fights were dropped, nothing is written and the database keeps its last good contents.
+5. **Load** upserts everything in one transaction.
+
+Known limits of the dataset, all surfaced by the validation report rather than hidden:
+- It starts at UFC 2 (1994-03-11). UFC 1 is absent.
+- Fighter profiles are captured once, when a fighter first appears, and not refreshed upstream. Height and reach are often empty for recent debutants, and names can go stale.
+- A few fights cannot be placed or attributed and are dropped (3 of 9,003 in the snapshot at commit `96adace`; run `uv run python -m ufc.ingest load --dry-run` to list them).
+
+### Upcoming cards: Wikipedia (milestone M5, not built yet)
+
+The dataset covers completed events only. Upcoming cards will be read from English Wikipedia through the MediaWiki API (`action=parse`, wikitext): the "Scheduled events" table of `List of UFC events` gives event pages and dates, and each event page lists bouts as `{{MMAevent bout|weight class|fighter|vs.|fighter|...}}` templates plus an "Announced bouts" list. Feasibility was confirmed against a live page; the saved responses are in `tests/fixtures/wikipedia/`. Wikipedia carries no UFCStats IDs, so upcoming bouts need their own IDs and the same name-to-ID resolution as above.
 
 ## Database schema (SQLite)
 
-Exact columns are finalized in `src/ufc/db/schema.sql` after parser recon; this is the target shape.
+The schema is `src/ufc/db/schema.sql`. Deviations from the original plan are explained in DECISIONS D20.
 
 - **events**: event_id (PK, UFCStats ID), name, date, location, status (`completed` / `upcoming`), first_seen_at, last_seen_at
 - **fighters**: fighter_id (PK), name, nickname, height_cm, reach_cm, stance, dob
-- **bouts**: bout_id (PK), event_id, fighter_a_id, fighter_b_id, weight_class, is_womens, is_title_bout, scheduled_rounds, status (`scheduled` / `completed` / `cancelled`), winner_id (nullable), result (`win` / `draw` / `nc`), method, end_round, end_time_s, first_seen_at, last_seen_at
-  - fighter_a/b follow UFCStats red/blue order for storage only. Corner is never a model feature.
-- **bout_fighter_stats**: (bout_id, fighter_id) PK; knockdowns, sig strikes landed/attempted, total strikes landed/attempted, takedowns landed/attempted, submission attempts, reversals, control time (s), sig strikes landed/attempted by target (head, body, leg) and position (distance, clinch, ground)
-- **raw_pages**: url (PK), fetched_at, sha256, cache_path, http_status
-- **predictions**: prediction_id, bout_id, model_version, created_at, p_fighter_a, p_fighter_b, features_json, shap_json, superseded_at (nullable), is_live (true if published before the event)
+- **bouts**: bout_id (PK), event_id, fighter_a_id, fighter_b_id, weight_class, bout_type_raw, is_womens, is_title_bout, is_interim_title, is_tournament_final, scheduled_rounds, time_format, status (`scheduled` / `completed` / `cancelled`), result (`win` / `draw` / `nc`), winner_id (nullable), method, method_details, referee, end_round, end_time_s, fight_time_s, has_stats, first_seen_at, last_seen_at
+  - fighter_a/b follow the order the source lists them in, for storage only. Corner is never a model feature.
+  - `has_stats = 0` marks bouts with no recorded stats; they have no stats rows, never rows of zeros.
+- **bout_round_stats**: (bout_id, fighter_id, round) PK; knockdowns, sig strikes landed/attempted, total strikes landed/attempted, takedowns landed/attempted, submission attempts, reversals, control time (s, NULL where not recorded), sig strikes landed/attempted by target (head, body, leg) and position (distance, clinch, ground)
+- **bout_fighter_stats**: (bout_id, fighter_id) PK; the same columns, derived at load time by summing the fighter's rounds
+- **source_files**: file_name (PK), sha256, row_count, upstream_repo, upstream_commit, snapshot_at. Which snapshot the tables were last loaded from.
+- **ingest_issues**: seq (PK), severity (`error` = data dropped, `warning`, `info`), check_name, entity_type, entity_id, message. The validation report of the last load.
+- **predictions**: defined in M5, once upcoming-bout identity is settled. Planned columns: prediction_id, bout_id, model_version, created_at, p_fighter_a, p_fighter_b, features_json, shap_json, superseded_at (nullable), is_live (true if published before the event)
 
-Loaders are idempotent upserts keyed on UFCStats IDs: running the same load twice produces identical tables.
+Loaders are idempotent upserts keyed on UFCStats IDs: running the same load twice produces identical tables. Timestamps come from the snapshot (the upstream commit date), not the clock.
 
 ## Handling card changes
 
-Each refresh scrapes upcoming events and compares with the database:
+Each refresh reads upcoming events (from Wikipedia, see above) and compares with the database:
 - New bout: insert, predict
 - Bout no longer on the card: mark `cancelled`, set `superseded_at` on its predictions
 - Replacement opponent: this is a new bout_id; old one is cancelled, new one predicted
@@ -87,7 +123,7 @@ Before publishing, check: event exists with a date in the future, at least one b
 |---|---|
 | S3 | Database file, published JSON, frontend build, model artifacts |
 | CloudFront | Serves the frontend and public JSON |
-| Lambda (container image) | Weekly refresh: scrape upcoming cards, predict, validate, publish. Container image because XGBoost and SHAP exceed zip size limits |
+| Lambda (container image) | Weekly refresh: fetch the dataset snapshot and upcoming cards, predict, validate, publish. Container image because XGBoost and SHAP exceed zip size limits |
 | EventBridge Scheduler | Triggers the refresh (more often in fight week) |
 | Lambda + function URL or HTTP API | Analyst endpoint |
 | DynamoDB (on-demand) | Analyst rate limits and daily spend counter |

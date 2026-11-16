@@ -5,8 +5,8 @@ Each milestone lists the recommended Claude Code model and effort. Milestones ru
 | # | Milestone | Model | Effort |
 |---|---|---|---|
 | M0 | Environment setup and verification | Sonnet 5.5 | Medium |
-| M1 | UFCStats scraper, parsers, schema, tests | Fable 5.2 | High |
-| M2 | Full historical scrape and data quality report | Sonnet 5.5 | Medium |
+| M1 | Dataset ingestion (published UFCStats-derived CSVs), schema, validation, tests | Fable 5.2 | High |
+| M2 | Data quality report on the loaded dataset | Sonnet 5.5 | Medium |
 | M3 | As-of feature pipeline, Elo, leakage tests | Fable 5.2 | High |
 | M4 | Baselines, training, calibration, evaluation report | Fable 5.2 (or Opus 5.5 after the Fable window) | High |
 | M5 | Upcoming-card ingestion, card-change handling, batch prediction | Opus 5.5 | High |
@@ -23,31 +23,26 @@ M10 can move earlier at any time; it is small.
 
 ---
 
-## M1 prompt (Fable 5.2, high effort)
+## M1 (Fable 5.2, high effort): done, re-scoped
 
-```
-Read CLAUDE.md and every file in docs/ before starting. This session is Milestone M1: the UFCStats scraper, parsers, database schema, and tests. Do not start M2 or later.
+M1 was planned as a UFCStats scraper. On the first request UFCStats returned a JavaScript proof-of-work bot challenge on every page, and the project does not work around it (DECISIONS D13). M1 was re-scoped to ingest a published dataset instead (D14). What it delivered:
 
-1. Check http://ufcstats.com/robots.txt and look for any terms-of-use page. Report what you find. If automated access to the pages we need is disallowed, stop and tell me before continuing.
-2. Recon: fetch one page of each type (completed events list, upcoming events list, one completed event, one fight details page, one fighter page, plus one early-era event from the 1990s and one bout that ended in a draw or no contest). Save them to tests/fixtures/html/. Describe the structure and the ID scheme in your summary.
-3. Implement src/ufc/scrape/client.py: descriptive User-Agent, max 1 request per second, timeouts, retries with exponential backoff, and a raw HTML cache in data/raw/ indexed in the raw_pages table. Pages for completed events and fights are fetched once and then served from cache; listing pages and upcoming events are re-fetchable.
-4. Implement pure parser functions (HTML in, dataclasses out) for each page type. Fight details: method, round, time, referee, and per-fighter stats (totals plus significant strikes by target and position). Fighter pages: physical attributes only (height, reach, stance, date of birth); do not store the career aggregate stats.
-5. Write src/ufc/db/schema.sql following docs/ARCHITECTURE.md (adjust columns to what recon shows; record any deviation in DECISIONS.md). Write idempotent upsert loaders keyed on UFCStats IDs.
-6. Tests: parser tests against every fixture; edge cases (draw, no contest, DQ, missing reach, missing date of birth, early events with no per-fight stats, split decisions, title bouts, women's bouts); an idempotency test (loading the same data twice gives identical tables).
-7. A CLI: `uv run python -m ufc.scrape completed --limit N` scrapes the N most recent completed events with all their fights and fighters. It must be resumable: rerunning after an interruption continues without refetching cached pages. Run it with --limit 3 and report row counts per table.
-8. Add a `--all` mode for the full history, but do not run it.
-9. Append decisions to docs/DECISIONS.md. Commit in small steps. Do not push.
-```
+- `uv run python -m ufc.ingest fetch`: downloads the six CSVs from `Greco1899/scrape_ufc_stats`, pinned to a commit, into `data/external/greco/`.
+- `uv run python -m ufc.ingest load`: parses, joins, validates and loads them into `data/ufc.db`. A validation gate stops a bad snapshot from overwriting good data. Loads are idempotent.
+- `src/ufc/db/schema.sql` and upsert loaders keyed on UFCStats IDs. Per-round stats are stored and per-fight totals derived.
+- Fighter names on bouts are resolved to fighter IDs by exact rules and an explicit override file (D17).
+- Tests run against a small real-data fixture (`tests/fixtures/greco/`) covering draws, no contests, DQs, missing attributes, early events without stats, split decisions, title bouts, women's bouts, and the dataset's own defects.
+- Saved Wikipedia API responses (`tests/fixtures/wikipedia/`) confirming that upcoming cards can be parsed in M5.
 
 ## M2 prompt (Sonnet 5.5, medium effort)
 
 ```
-Read CLAUDE.md and docs/ARCHITECTURE.md. This session is Milestone M2: run the full historical scrape and produce a data quality report.
+Read CLAUDE.md and docs/ARCHITECTURE.md. This session is Milestone M2: a data quality report on the loaded dataset. There is no long scrape any more; a full load takes seconds.
 
-1. Estimate the number of pages and the run time at 1 request per second, and tell me before starting.
-2. Start `uv run python -m ufc.scrape completed --all` inside a tmux session (install tmux if missing) with logging to data/logs/, so it survives this session ending. Tell me the exact command to reattach and check progress.
-3. While it runs, write scripts/data_quality.py that reports: events and bouts per year, results breakdown (win, draw, NC), method breakdown, bouts missing per-fight stats by year, fighters missing reach, height, or date of birth, duplicate checks, and any bouts whose fighters are missing from the fighters table.
-4. When the scrape finishes (or now, on partial data if it is still running), run the report and write the results to docs/DATA_QUALITY.md. Only include numbers the script produced.
+1. Run `uv run python -m ufc.ingest fetch` and `uv run python -m ufc.ingest load`. Report the upstream commit, the row counts per table, and every error and warning in the validation report.
+2. Write scripts/data_quality.py that reads data/ufc.db and reports: events and bouts per year, results breakdown (win, draw, NC), method breakdown, bouts missing per-fight stats by year, rounds missing control time by year, fighters missing reach, height, stance, or date of birth (overall, and separately for fighters with a bout in the last two years), duplicate checks, the contents of ingest_issues grouped by check, and the gap in days between consecutive events (to spot missing events).
+3. Review the dropped bouts and the name resolutions listed by `load --verbose`. For each dropped bout, say whether an entry in src/ufc/ingest/identity_overrides.csv could resolve it and what evidence in the data supports it. Do not add an override without evidence from the dataset itself.
+4. Run the report and write the results to docs/DATA_QUALITY.md. Only include numbers the script produced, and name the upstream commit they came from.
 5. Commit the script and report. Do not push.
 ```
 
