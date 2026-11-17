@@ -8,6 +8,13 @@ was at the last commit before each of a few dates and compares the parsed
 height, reach, stance and date of birth with the pinned snapshot, for every
 profile and for the fighters who have a test-period bout.
 
+It then groups the test-period results of ``python -m ufc.models.diagnostics``
+(run that first) by whether the fighters' profiles changed, and scores the
+saved candidate, without refitting it, on the bouts fought before upstream's
+refresh using the profiles upstream held then. That reads test-period rows,
+so the run is recorded in ``data/models/test_diagnostics.jsonl`` (DECISIONS
+D45). Analysis only.
+
 Requests go to GitHub only (the commits API and raw files), through the
 ingest's session: timeouts, retries with backoff, a descriptive User-Agent.
 Old files are kept under ``data/external/greco_history/`` (not committed) and
