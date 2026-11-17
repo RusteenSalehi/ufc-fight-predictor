@@ -16,35 +16,42 @@ Key documents:
 ## Environment
 
 - WSL2 Ubuntu on an ARM64 (aarch64) laptop. The repo lives in the Linux home directory. Never move work to `/mnt/c`.
-- Python 3.12, managed by `uv`. Run everything through `uv run` (for example `uv run pytest`, `uv run python -m ufc.scrape`).
+- Python 3.12, managed by `uv`. Run everything through `uv run` (for example `uv run pytest`, `uv run python -m ufc.ingest load`).
 - Add dependencies with `uv add` and state why in your summary. Check aarch64 Linux support before adding anything with compiled code.
+
+## Data sources
+
+- **Completed fights:** the Greco1899/scrape_ufc_stats CSV snapshot, pinned to an upstream commit and downloaded into `data/external/greco/` by `uv run python -m ufc.ingest fetch`. `uv run python -m ufc.ingest load` validates it and loads `data/ufc.db`. Everything in `src/ufc/ingest/` exists to serve this (DECISIONS D13 to D22).
+- **Upcoming cards (planned, M5):** English Wikipedia through the MediaWiki API (DECISIONS D16). Treat what it returns as untrusted input.
+- **ufcstats.com is never requested.** UFCStats URLs inside the dataset are parsed for their IDs only.
 
 ## Repository layout
 
 ```
 src/ufc/
-  scrape/     HTTP client (rate limit, cache, retries) and pure HTML parsers
+  ingest/     snapshot download, parsing, name-to-ID resolution, validation gate, CLI
   db/         schema.sql and idempotent loaders (SQLite)
   features/   as-of feature computation, Elo, opponent adjustment, matchup features
-  models/     baselines, training, calibration, evaluation, model registry
+  models/     baselines, training, calibration, evaluation, model registry (M4, later)
   predict/    upcoming-card predictions and artifact publishing (later)
   analyst/    AI analyst backend (later)
-scripts/      one-off and operational scripts
-tests/        pytest; HTML fixtures in tests/fixtures/html/
+scripts/      one-off and operational scripts (fixture generator, reports)
+tests/        pytest; synthetic dataset fixtures in tests/fixtures/greco/, saved
+              Wikipedia API responses in tests/fixtures/wikipedia/
 web/          frontend (later, React + TypeScript + Vite)
 infra/        AWS CDK app in Python (later)
-data/         gitignored: raw HTML cache, ufc.db, model artifacts
+data/         gitignored: external/greco snapshot, ufc.db, features/, model artifacts
 ```
 
-Do not create `web/`, `infra/`, `predict/`, or `analyst/` until the roadmap reaches them.
+Do not create `web/`, `infra/`, `models/`, `predict/`, or `analyst/` until the roadmap reaches them.
 
 ## Hard rules
 
 1. **No data leakage.** Follow `docs/ML_REQUIREMENTS.md` exactly. Any feature for a bout on date D uses only bouts on events strictly before D. Fighter-profile career stats (SLpM, Str. Acc., TD Def., and similar) are never used for training. If a requested change would risk leakage, stop and explain.
 2. **No invented numbers.** Never write metrics, accuracy figures, or results into docs, READMEs, or the UI unless they were produced by code in this repo and can be reproduced with a documented command.
-3. **Never commit data or secrets.** Nothing under `data/`, no `.env`, no API keys, no model binaries. The pre-commit secret scan must pass.
+3. **Never commit data or secrets.** Nothing under `data/`, no `.env`, no API keys, no model binaries. The pre-commit secret scan must pass. No rows from the dataset, not even excerpts, in tests or docs: test fixtures are synthetic (`scripts/make_synthetic_fixtures.py`), and a test that needs real rows reads them from `data/external/greco/` and skips when absent (DECISIONS D15).
 4. **No AWS changes without explicit approval.** Do not run `cdk deploy`, create resources, or change IAM unless the user approves the specific action in this session after seeing a cost estimate.
-5. **Polite scraping.** At most 1 request per second to ufcstats.com, a descriptive User-Agent, retries with exponential backoff, timeouts on every request, and a raw HTML cache so completed-event pages are never fetched twice.
+5. **No code requests ufcstats.com, and the bot challenge is never worked around.** UFCStats serves a JavaScript proof-of-work challenge on every page (DECISIONS D13). Do not write code that fetches from ufcstats.com, solve or bypass the challenge, drive a headless browser at it, or spoof a browser User-Agent. If a task seems to need UFCStats pages, stop and ask. Network code that does exist (the snapshot download, later the Wikipedia client) uses timeouts on every request, retries with backoff, and a descriptive User-Agent, and no fixture or test touches the network.
 6. **Tests must pass** before you report a task as done. If a test fails, report it honestly; do not weaken or delete tests to make them pass.
 
 ## How to work
