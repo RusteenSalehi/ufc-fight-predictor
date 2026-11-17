@@ -125,7 +125,7 @@ uv run python -m ufc.features summary    # every feature by family, with missing
 2. **Fit** on bouts through 2022-12-31 only: Elo parameters by log loss of pre-fight predictions (`elo.py`), the league-average stat line used as a prior for opponent baselines (`adjust.py`), and the weight-class mean rates that per-minute rates are shrunk toward (`shrink.py`).
 3. **Build** one date at a time (`build.py`). Features for every bout on a date are computed from a store that holds earlier dates only; the date's bouts are added afterwards. Each bout enters the store as one vector of additive counts per fighter, and each fighter keeps running sums of those vectors (`components.py`, `store.py`), so career, last-3, last-5 and time-decayed rates are lookups.
 4. **Assemble** each bout's row (`fighter.py`, `matchup.py`): every `d_` feature is fighter A's value minus fighter B's, or a pair value minus its mirror image, so swapping the fighters negates it exactly. Three `lvl_` columns are the mean of the two fighters' age, UFC fights and Elo, which swapping leaves exactly unchanged.
-5. **Write** `features.parquet` (identity, bout context, `label`, six per-fighter flags, the `d_` features, then the `lvl_` columns) and `features_meta.json` (snapshot commit, settings, fitted parameters, ordered feature list, feature-to-family map for the thirteen families, and the level columns).
+5. **Write** `features.parquet` (identity, bout context, `label`, six per-fighter flags, the `d_` features, the `lvl_` columns, then the M4.5 candidate columns, which no model reads unless its feature list names them, D55) and `features_meta.json` (snapshot commit, settings, fitted parameters, ordered feature list, feature-to-family map for the thirteen families, and the level columns).
 
 `build_matchup(store, fighter_a_id, fighter_b_id, date, weight_class)` returns the same features for any pair and date, real or hypothetical, plus each fighter's own as-of values for display. It reads histories through one lookup that returns only bouts strictly before the date. The batch build calls the same code, and a test checks that both give identical rows for every bout.
 
@@ -139,6 +139,7 @@ uv run python -m ufc.models evaluate    # score the saved candidate on the test 
 uv run python -m ufc.models report      # write the generated part of docs/MODEL_REPORT.md
 uv run python -m ufc.models.diagnostics # analysis only: era-shift checks (D45); reads the test period
 uv run python -m ufc.models refit       # production refit of the candidate's recipe on every bout (D47)
+uv run python -m ufc.models.revision run --variants ...   # M4.5 variant analysis (D54 to D57); analysis only
 ```
 
 1. **Splits** (`splits.py`): train through 2022-12-31, validation 2023 to 2024, test from 2025. All rows reach model code through `Splits`, which refuses test-period rows until `evaluate` unlocks them for a saved candidate. Fitting uses bouts with a winner and no attribute gap (D44).

@@ -50,6 +50,12 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - Results, including the choices validation could not separate and the families that did not help, are in `docs/MODEL_REPORT.md`. The candidate is not approved; `data/models/approved.json` is written by hand.
 - Open for M5: bouts with an attribute gap (mostly recent debutants) need the "limited data" label; prediction must build features with the settings and fitted parameters stored beside the model (`feature_pipeline.json`); the recipe has been refitted on data through 2026-11-14 as `xgboost-ffc3ca8c-ee729619` (D47; not approved), and M5 predicts with whichever version `approved.json` names.
 
+## M4.5 (Opus 5.5, high effort): model revision, analysis done, adoption open
+
+- Triggered by age dominating SHAP when an older, higher-rated fighter meets a much younger one. `uv run python -m ufc.models.revision run` (slices and variants) and `... calibration-window`; results in `docs/MODEL_REPORT.md`, "Model revision M4.5"; decisions D54 to D57.
+- Finding: the model does not underrate elite veterans; it slightly overrates older fighters. Of four pre-registered variants, `age_shape` passes the rule (weakly) and is the recommended recipe; nothing has been refitted or approved.
+- Open, the user's call: adopt `age_shape` (save a candidate with the fixed recipe, refit, approve) or keep the current recipe; the calibration window for the next refit (rolling 2023 to 2026 recommended).
+
 ## M5 (Opus 5.5, high effort): done
 
 - `uv run python -m ufc.predict refresh`: the scheduled events and their cards from English Wikipedia (MediaWiki API, two to four requests, cached), fighter resolution with the ingest's rules, card changes applied whole or not at all, staleness against completed events the dataset lacks, missing attributes from fighters' infoboxes, predictions with the approved model, and a JSON dump in `data/publish/` behind the validation gate. Design choices are in DECISIONS D48 to D53.

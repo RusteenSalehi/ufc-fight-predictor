@@ -6,8 +6,8 @@ and creating it is a manual step (`{"version": "xgboost-71fab189-44ddd3f0"}`).
 
 The block between the GENERATED markers is rebuilt from the metrics files by the last command below and is
 replaced on every run. Everything above it is written by hand and uses only numbers from that block. The
-"Era-shift diagnostic" and "Production refit" sections after the block are also written by hand, each from the
-output of its own command.
+"Era-shift diagnostic", "Production refit" and "Model revision M4.5" sections after the block are also
+written by hand, each from the output of its own command.
 
     uv run python -m ufc.ingest fetch
     uv run python -m ufc.ingest load
@@ -749,3 +749,169 @@ booster fitted on more data. 2025 to 2026 is the period the era-shift diagnostic
 recent cards stop being as predictable as they were there, live predictions will be overconfident, and the
 calibration table of published predictions is where that will show first.
 
+
+## Model revision M4.5
+
+Written by hand on 2026-11-17 from `data/reports/revision/revision_base-schedule-age_shape-catch_weight-combined.json`
+and `calibration_window.json` beside it, which two commands write:
+
+    uv run python -m ufc.models.revision run --variants base,schedule,age_shape,catch_weight,combined
+    uv run python -m ufc.models.revision calibration-window
+
+**Trigger.** In upcoming predictions, age was the largest SHAP contribution in bouts where an older,
+higher-rated fighter meets a much younger one (`scripts/explain_bouts.py`). The hypothesis: age-gap bouts
+are confounded with matchmaking (declining veterans booked against prospects), so the model over-penalises
+age when the older fighter is still elite. The question came from upcoming bouts; none of them is used
+below. The variants and the adoption rule were registered in DECISIONS D54 after step 1 and before any
+variant was run.
+
+**Evidence and its status.** *Validation* is 2023 to 2024 with the candidate's pipeline (fitted through
+2022), five seeds, Platt calibration cross-validated inside validation; variants are compared here.
+*Backtest* is the walk-forward folds 2013 to 2024, seed 0, on the registered schedule; these years were
+scored with a recipe chosen on 2023 to 2024, so they are a backtest, not a held-out result, but they do not
+read the test period. *Secondary* is the 2025 and 2026 folds: test-period bouts that have been looked at
+before (D45). They are reported for completeness, logged in `data/models/test_diagnostics.jsonl`, and used
+for no decision. The unchanged recipe reproduces the registered candidate's validation probabilities and
+the saved backtest exactly.
+
+**The slice.** One fighter is at least 6 years older than the other, and his Elo rating before the bout is
+higher by at least 50 (or 100) points. The mirror slice has the older fighter rated lower by as much.
+Everything is from the older fighter's side: predicted is the mean probability the model gave him, won is
+how often he won (95% Wilson interval), gap is predicted minus won (95% bootstrap interval; positive means
+the model **over**rates the older fighter).
+
+### 1. Is the model overconfident against elite veterans? No
+
+The unchanged recipe (`base`):
+
+| period | slice | bouts | predicted | won | gap | log loss |
+|---|---|---:|---:|---:|---:|---:|
+| validation | older, Elo +50 | 54 | 44.3% | 33.3% (22.2 to 46.6) | +0.109 (-0.009 to +0.227) | 0.6298 |
+| validation | older, Elo +100 | 20 | 48.6% | 35.0% (18.1 to 56.7) | +0.136 (-0.061 to +0.335) | 0.6465 |
+| validation | older, Elo -50 (mirror) | 71 | 27.2% | 14.1% (7.8 to 24.0) | +0.131 (+0.047 to +0.211) | 0.4517 |
+| validation | older, Elo -100 (mirror) | 27 | 23.4% | 11.1% (3.9 to 28.1) | +0.122 (+0.008 to +0.215) | 0.3467 |
+| validation | every 6-year age gap | 274 | 35.0% | 29.2% (24.1 to 34.8) | +0.058 (+0.003 to +0.111) | 0.5825 |
+| backtest 2013-2024 | older, Elo +50 | 356 | 48.6% | 43.8% (38.8 to 49.0) | +0.048 (-0.004 to +0.096) | 0.6756 |
+| backtest 2013-2024 | older, Elo +100 | 130 | 51.0% | 53.1% (44.5 to 61.4) | -0.021 (-0.107 to +0.059) | 0.6826 |
+| backtest 2013-2024 | older, Elo -50 (mirror) | 368 | 34.7% | 27.2% (22.9 to 31.9) | +0.075 (+0.029 to +0.121) | 0.5960 |
+| backtest 2013-2024 | older, Elo -100 (mirror) | 123 | 31.5% | 20.3% (14.2 to 28.3) | +0.111 (+0.042 to +0.178) | 0.5234 |
+| backtest 2013-2024 | every 6-year age gap | 1,455 | 41.6% | 36.4% (34.0 to 38.9) | +0.051 (+0.028 to +0.077) | 0.6510 |
+| secondary (already seen) | older, Elo +50 | 73 | 45.1% | 42.5% (31.8 to 53.9) | +0.027 (-0.075 to +0.135) | 0.6090 |
+| secondary (already seen) | older, Elo +100 | 25 | 50.0% | 52.0% (33.5 to 70.0) | -0.020 (-0.219 to +0.171) | 0.7063 |
+
+For comparison, Elo alone gives the older, higher-rated fighter (+50) 62.8% on validation and 63.1% on the
+backtest, against 33.3% and 43.8% won.
+
+**Verdict.** The hypothesis is not supported. In no period does the model underrate the older fighter
+when he is rated higher. At +50 it overrates him by about 5 points on the backtest and 11 on validation,
+with intervals that just include zero; at +100 the backtest is close to calibrated (-2.1 points, interval
+-10.7 to +5.9). Across every bout with a 6-year age gap, and in the mirror slices, the model gives the older
+fighter **too much**, with intervals that exclude zero. The large age contribution in SHAP is the model
+discounting Elo, which overrates older fighters by about 19 points in this slice; if anything it discounts
+too little. The slices are small (54 and 356 bouts at +50), so the data cannot rule out a modest
+underrating of genuinely elite veterans at +100, but nothing points that way.
+
+### 2. Variants
+
+Each variant adds inputs to the candidate's recipe and changes nothing else: no re-tuning, the same
+library, settings, half-life, shrinkage, level features and calibration method (DECISIONS D54, D55).
+
+- `schedule` (proposed family 14): best win and worst loss by the opponent's rating at the time, and wins
+  and losses against opponents then rated above the fighter. 4 inputs.
+- `age_shape`: years past 32 and years past the class's median age (fitted on training) as differences,
+  and the bout's mean age relative to the class median as a level column. 3 inputs. (Age relative to the
+  median *as a difference* would equal `d_age`; D55.)
+- `catch_weight`: catch-weight bouts counted as the division of the fighter's adjacent bouts in "fights at
+  this weight" and the weight-change features. No new inputs.
+- `combined`: all three.
+
+Validation log loss is uncalibrated, mean over five seeds (the selection convention); deltas are variant
+minus base, paired over bouts, with 95% intervals.
+
+| variant | validation log loss | delta | backtest 2013-2024 | delta | secondary (already seen) delta |
+|---|---:|---:|---:|---:|---:|
+| base | 0.6355 | | 0.6619 | | |
+| schedule | 0.6345 | -0.0010 (-0.0029 to +0.0007) | 0.6613 | -0.0006 (-0.0016 to +0.0003) | -0.0013 (-0.0047 to +0.0019) |
+| age_shape | 0.6367 | +0.0011 (-0.0013 to +0.0036) | 0.6608 | -0.0012 (-0.0022 to -0.0002) | +0.0021 (-0.0016 to +0.0058) |
+| catch_weight | 0.6362 | +0.0006 (-0.0001 to +0.0012) | 0.6618 | -0.0001 (-0.0006 to +0.0003) | -0.0007 (-0.0024 to +0.0011) |
+| combined | 0.6353 | -0.0002 (-0.0029 to +0.0024) | 0.6609 | -0.0010 (-0.0022 to +0.0001) | +0.0014 (-0.0032 to +0.0060) |
+
+The elite-veteran slice (older by 6 years, Elo +50) for each variant. Slice delta is variant minus base,
+paired over the slice's bouts; "moved" is how far the variant moved the older fighter's probability.
+
+| variant | backtest gap | backtest slice log loss | delta | moved | validation slice log loss | delta |
+|---|---:|---:|---:|---:|---:|---:|
+| base | +0.0480 | 0.6756 | | | 0.6298 | |
+| schedule | +0.0490 | 0.6739 | -0.0018 (-0.0060 to +0.0024) | +0.0010 | 0.6273 | -0.0024 (-0.0116 to +0.0063) |
+| age_shape | +0.0366 | 0.6742 | -0.0014 (-0.0065 to +0.0042) | -0.0114 | 0.6248 | -0.0050 (-0.0207 to +0.0121) |
+| catch_weight | +0.0482 | 0.6739 | -0.0018 (-0.0041 to +0.0005) | +0.0003 | 0.6320 | +0.0022 (-0.0000 to +0.0046) |
+| combined | +0.0369 | 0.6732 | -0.0025 (-0.0082 to +0.0035) | -0.0110 | 0.6209 | -0.0088 (-0.0239 to +0.0072) |
+
+### 3. The pre-registered rule
+
+A variant passes if (1) the validation interval does not lie entirely above zero, (2) on the backtest the
+slice's absolute gap is smaller and its log loss lower than the base's, and (3) the slice's validation log
+loss is not higher (D54).
+
+| variant | (1) | (2) | (3) | result |
+|---|---|---|---|---|
+| schedule | yes | no: gap 0.0490 against 0.0480 | yes | fails |
+| age_shape | yes | yes | yes | **passes** |
+| catch_weight | yes | no: gap 0.0482 against 0.0480 | no: 0.6320 against 0.6298 | fails |
+| combined | yes | yes | yes | passes |
+
+Two pass. `combined` has the lower validation log loss, but against `age_shape` the difference is -0.0014
+(-0.0034 to +0.0004), inside the noise, so the rule's tie-break goes to the variant with fewer inputs:
+**`age_shape`**.
+
+**How strong the pass is.** Weak. `age_shape` passes the rule as written, and the rule was written before
+the result. But its validation log loss is higher than the base's by 0.0011 (inside the noise, which is
+what criterion 1 allows); the slice improvements are inside their intervals; and on the already-seen 2025
+to 2026 folds it is 0.0021 worse, also inside the noise. Its one clear result is on the backtest overall:
+-0.0012 (-0.0022 to -0.0002) over 5,702 bouts. It also moves predictions in the opposite direction from the
+hypothesis: the older fighter's probability falls by about one point in the slice, because the model now
+weighs age past the class's typical age more, not less.
+
+`schedule` is the closest miss: the lowest validation log loss of the four and lower slice log loss
+everywhere before the test period, but the slice's gap grows by 0.001, so it fails criterion 2. It did not
+change the slice's calibration in either direction. `catch_weight` has no measurable effect: 85 bouts in
+the whole dataset are catch weights.
+
+### 4. (d) Calibration window for the production refit
+
+The refit's Platt slope (D47) is fitted on out-of-time predictions for 2025 to 2026. Fitting it on 2023 to
+2026 instead cannot be scored on validation (there is no held-out period left for a refit), so only the
+slopes and what they do to confidence are reported. All fits leave out attribute-gap bouts, as D47 does.
+Spread is measured on the production booster's 500 bouts of 2026 with a winner; it was fitted on them, so
+these are confidence levels, not scores. Uncalibrated, its favourite averages 63.7%.
+
+| slope fitted on | bouts | slope | mean favourite | median | 90th percentile | at 70% or more |
+|---|---:|---:|---:|---:|---:|---:|
+| 2025 to 2026, model fitted through 2024 (current) | 911 | 1.393 | 68.0% | 67.2% | 83.8% | 41.2% |
+| 2023 to 2026, model fitted through 2022 | 1,928 | 1.333 | 67.4% | 66.5% | 82.8% | 40.2% |
+| 2023 to 2026, 2023-2024 from the 2022 model and 2025-2026 from the 2024 model | 1,928 | 1.303 | 67.1% | 66.2% | 82.3% | 39.2% |
+| 2023 to 2024 only, model fitted through 2022 (the candidate's own) | 1,017 | 1.216 | 66.1% | 65.2% | 80.8% | 35.6% |
+
+The two slopes reproduce the recorded ones (1.393 in "Production refit", 1.216 for the candidate). Widening
+the window lowers the slope by 0.06 to 0.09 and the average favourite by 0.6 to 0.9 points. Every window
+gives a slope above 1, so the model is underconfident before calibration in every period; the question is
+only by how much, and 2025 to 2026 says most. The rolling window keeps every prediction out of time for the
+model that made it and halves the weight of the two years the era-shift diagnostic could not explain.
+
+### Recommendation (not applied)
+
+- **Recipe:** the candidate's recipe plus the three `age_shape` inputs, everything else unchanged, as the
+  pre-registered rule selects. Expect a small change: it is not shown to be better on validation, it is
+  better on the 2013 to 2024 backtest by about 0.001, and it makes the model slightly *less* generous to
+  older fighters. Keeping the current recipe is the alternative; the evidence for either is thin, and the
+  main finding of M4.5 is that the problem it set out to fix is not in the data.
+- **Calibration window, if the recipe is refitted:** the rolling 2023 to 2026 window (slope 1.303 on the
+  current recipe). This is a judgment, not a measured improvement.
+- **Not adopted:** `schedule`, `catch_weight`, `combined`. Their columns stay in the feature table as
+  candidates and no model reads them (D55).
+- Nothing has been refitted, no model has been saved, and `data/models/approved.json` is unchanged.
+
+**Limits.** The elite slice has 54 validation bouts and 356 backtest bouts, so slice differences of a
+point or two are noise, and four variants gave four chances to pass by luck. The backtest years were scored
+with a recipe chosen on 2023 to 2024. Age comes from today's profiles (leakage rule 3). The hypothesis was
+prompted by upcoming bouts, which the analysis does not use but which shaped the question.
