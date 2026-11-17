@@ -126,7 +126,8 @@ def build_features(
         store.commit_date(day, day_bouts)
 
     frame = pd.DataFrame(context, columns=list(CONTEXT_COLUMNS))
-    frame["date"] = pd.to_datetime(frame["date"])
+    # Milliseconds: the resolution parquet stores, so a file reads back equal.
+    frame["date"] = pd.to_datetime(frame["date"]).astype("datetime64[ms]")
     frame["scheduled_rounds"] = frame["scheduled_rounds"].astype("float64")
     frame["label"] = frame["label"].astype("float64")
     for column in ("is_womens", "is_title_bout"):

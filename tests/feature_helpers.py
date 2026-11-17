@@ -11,6 +11,7 @@ from __future__ import annotations
 import random
 from dataclasses import replace
 from datetime import date, timedelta
+from pathlib import Path
 
 import numpy as np
 
@@ -184,6 +185,16 @@ class League:
                     FightStats(bout_id, fighter_id, sum_stat_lines(lines))
                 )
         return bout_id
+
+    def write_db(self, path: Path | str) -> None:
+        """Load the league into a SQLite database with the real loaders."""
+        conn = connect(path)
+        try:
+            loaders.load_dataset(
+                conn, self.dataset, seen_at=SEEN_AT, repo="test/league", commit="abc123"
+            )
+        finally:
+            conn.close()
 
     def data(self) -> FeatureData:
         """Load into SQLite and read back the way the pipeline does."""
