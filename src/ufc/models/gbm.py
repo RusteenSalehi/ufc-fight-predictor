@@ -113,6 +113,18 @@ class GbmModel:
             out = self._booster.predict(x, num_threads=1)
         return np.asarray(out, dtype=np.float64)
 
+    def contributions(self, x: np.ndarray) -> np.ndarray:
+        """TreeSHAP contributions to the log-odds of ``one_sided``: one
+        column per input and a last column for the bias, summing to the
+        model's raw margin for each row."""
+        if self.library == XGBOOST:
+            out = self._booster.predict(
+                xgb.DMatrix(x, nthread=1), pred_contribs=True, validate_features=False
+            )
+        else:
+            out = self._booster.predict(x, pred_contrib=True, num_threads=1)
+        return np.asarray(out, dtype=np.float64)
+
     def save(self, directory: Path) -> Path:
         path = directory / MODEL_FILES[self.library]
         self._booster.save_model(str(path))
