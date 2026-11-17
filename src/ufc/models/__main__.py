@@ -331,16 +331,29 @@ def run_report(args: argparse.Namespace) -> int:
 
     selection = json.loads(selection_path.read_text())
     version = selection["version"]
+    test, backtest = optional(TEST_FILE), optional(WALK_FORWARD_FILE)
     write_report(
         args.out,
         selection=selection,
         manifest=registry.read_manifest(args.models, version),
         config=registry.read_json(args.models, version, "config.json"),
-        test=optional(TEST_FILE),
-        backtest=optional(WALK_FORWARD_FILE),
+        test=test,
+        backtest=backtest,
         ledger=registry.read_ledger(args.models),
     )
+    # Plots are a function of the same records, so they are redrawn here and
+    # always match the numbers in the report.
+    directory = args.reports / "plots"
+    plots.period_plots(
+        selection["validation"], directory / "validation", "Validation period"
+    )
+    plots.ablation(selection["ablation"], directory / "validation" / "ablation.png")
+    if test is not None:
+        plots.period_plots(test, directory / "test", "Test period")
+    if backtest is not None:
+        plots.walk_forward(backtest, directory / "walk_forward.png")
     print(f"Wrote the generated block of {args.out}")
+    print(f"Plots: {directory}")
     return 0
 
 

@@ -171,9 +171,19 @@ def _header(selection: Mapping, manifest: Mapping, config: Mapping) -> list[str]
 
 def _attribute_gap(selection: Mapping) -> list[str]:
     gap = selection["attribute_gap"]
+
+    def first_year(period: str) -> int:
+        return (
+            0
+            if period.startswith("through")
+            else int(re.search(r"\d{4}", period).group())
+        )
+
     rows = [
         [period, row["n"], pct(row["complete_profile_won"])]
-        for period, row in gap["one_sided_by_period"].items()
+        for period, row in sorted(
+            gap["one_sided_by_period"].items(), key=lambda item: first_year(item[0])
+        )
         if row["n"]
     ]
     return [

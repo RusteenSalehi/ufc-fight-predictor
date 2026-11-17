@@ -49,7 +49,7 @@ BASELINE_ORDER: tuple[str, ...] = ("model", "logistic", "elo")
 
 LINE = 2.0
 MARKER = 7.0  # points; about 9 px at the saved resolution
-BAR = 0.22  # bar thickness in axis units, well under the slot width
+BAR = 0.065  # bar thickness in axis units: about 24 px, well under the slot width
 DPI = 160
 
 
@@ -86,9 +86,10 @@ def _figure(n_cols: int, width: float = 5.2, height: float = 4.0, n_rows: int = 
     return fig, axes
 
 
-def _save(fig: Figure, path: Path, caption: str) -> Path:
+def _save(fig: Figure, path: Path, caption: str, top: float = 1.0) -> Path:
+    """``top`` below 1 leaves a band above the panels for a shared legend."""
     fig.text(0.01, 0.005, caption, color=MUTED, fontsize=8, ha="left", va="bottom")
-    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.tight_layout(rect=(0, 0.04, 1, top))
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=DPI, facecolor=SURFACE)
     plt.close(fig)
@@ -120,15 +121,13 @@ def _points(
 def _reliability_panel(
     ax: Axes, tables: Mapping[str, list[dict]], names: Sequence[str]
 ) -> None:
-    ax.plot([0.5, 1.0], [0.5, 1.0], color=AXIS, linewidth=1.0, zorder=1)
-    ax.annotate(
-        "perfectly calibrated",
-        xy=(0.93, 0.93),
-        xytext=(-6, -14),
-        textcoords="offset points",
-        color=MUTED,
-        fontsize=8,
-        ha="right",
+    ax.plot(
+        [0.5, 1.0],
+        [0.5, 1.0],
+        color=AXIS,
+        linewidth=1.0,
+        zorder=1,
+        label="Perfect calibration",
     )
     for name in names:
         rows = [r for r in tables[name] if r["n"]]
@@ -174,7 +173,7 @@ def reliability(record: Mapping, path: Path, period: str) -> Path:
     bottom.bar(
         centres,
         [r["n"] for r in rows],
-        width=0.022,
+        width=0.008,
         color=COLORS["model"],
         linewidth=0,
     )
@@ -214,7 +213,7 @@ def _grouped_bars(
 ) -> None:
     labels = list(groups)
     for i, name in enumerate(names):
-        offset = (i - (len(names) - 1) / 2) * (BAR + 0.03)
+        offset = (i - (len(names) - 1) / 2) * (BAR + 0.012)
         values = [groups[label][name][metric] for label in labels]
         ax.bar(
             [j + offset for j in range(len(labels))],
@@ -294,7 +293,7 @@ def by_confidence(record: Mapping, path: Path, period: str) -> Path:
     ax.bar(
         positions,
         [r["favourite_win_rate"] for r in rows],
-        width=0.42,
+        width=0.14,
         color=COLORS["model"],
         linewidth=0,
         label="Share of bouts the model's pick won",
@@ -353,7 +352,18 @@ def walk_forward(record: Mapping, path: Path) -> Path:
             )
         for name in BASELINE_ORDER:
             _points(ax, years, [f["metrics"][name][metric] for f in folds], name)
-        ax.axhline(0.6931 if metric == "log_loss" else 0.5, color=AXIS, linewidth=1.0)
+        chance = 0.6931 if metric == "log_loss" else 0.5
+        ax.axhline(chance, color=AXIS, linewidth=1.0)
+        ax.annotate(
+            "coin flip",
+            xy=(years[-1] + 0.5, chance),
+            xytext=(-2, 3),
+            textcoords="offset points",
+            ha="right",
+            color=MUTED,
+            fontsize=8,
+        )
+        ax.set_xlim(years[0] - 0.6, years[-1] + 0.6)
         ax.set_xticks(years)
         ax.set_xticklabels([f"'{str(y)[2:]}" for y in years])
         ax.set_xlabel("Year scored")
@@ -373,12 +383,22 @@ def walk_forward(record: Mapping, path: Path) -> Path:
                 color=INK_SECONDARY,
                 fontsize=8,
             )
-    _legend(axes[0, 0], loc="lower left")
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper right",
+        ncol=len(labels),
+        frameon=False,
+        fontsize=9,
+        labelcolor=INK_SECONDARY,
+    )
     return _save(
         fig,
         path,
         "Each year: fitted through Y-3, trees and calibrator from Y-2 and Y-1. The "
         "recipe was chosen on 2023 to 2024, so only the shaded years are untouched.",
+        top=0.93,
     )
 
 
@@ -391,7 +411,7 @@ def ablation(record: Mapping, path: Path) -> Path:
     ax.barh(
         positions,
         [r["delta"] for r in rows],
-        height=0.5,
+        height=0.4,
         color=COLORS["model"],
         linewidth=0,
     )
