@@ -12,6 +12,7 @@ Key documents:
 - `docs/ML_REQUIREMENTS.md`: leakage rules, features, evaluation protocol (non-negotiable)
 - `docs/DECISIONS.md`: log of design decisions; append to it (see below)
 - `docs/ROADMAP.md`: milestones and their order
+- `docs/MODEL_REPORT.md`: selection, ablation, test-period and backtest results (generated block; see below)
 
 ## Environment
 
@@ -32,7 +33,8 @@ src/ufc/
   ingest/     snapshot download, parsing, name-to-ID resolution, validation gate, CLI
   db/         schema.sql and idempotent loaders (SQLite)
   features/   as-of feature computation, Elo, opponent adjustment, matchup features
-  models/     baselines, training, calibration, evaluation, model registry (M4, later)
+  models/     splits with a test-period lock, baselines, XGBoost and LightGBM, calibration,
+              selection, evaluation, walk-forward backtest, model registry, report, CLI
   predict/    upcoming-card predictions and artifact publishing (later)
   analyst/    AI analyst backend (later)
 scripts/      one-off and operational scripts (fixture generator, reports)
@@ -43,7 +45,14 @@ infra/        AWS CDK app in Python (later)
 data/         gitignored: external/greco snapshot, ufc.db, features/, model artifacts
 ```
 
-Do not create `web/`, `infra/`, `models/`, `predict/`, or `analyst/` until the roadmap reaches them.
+Do not create `web/`, `infra/`, `predict/`, or `analyst/` until the roadmap reaches them.
+
+## Models
+
+- `uv run python -m ufc.models train` selects on validation and saves a candidate under `data/models/`. It also rewrites `data/features/` with the feature table it chose.
+- `uv run python -m ufc.models evaluate` is the only command that reads test-period rows. Each run is recorded in `data/models/test_evaluations.jsonl`. Do not run it to compare ideas; change something, select on validation, and evaluate a finalized candidate once.
+- `uv run python -m ufc.models report` rewrites the generated block of `docs/MODEL_REPORT.md`. Numbers in that file's hand-written part must come from the block.
+- `data/models/approved.json` is edited by the user only. No code and no session writes it.
 
 ## Hard rules
 

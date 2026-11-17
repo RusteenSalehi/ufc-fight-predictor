@@ -105,11 +105,30 @@ uv run python -m ufc.features summary    # every feature by family, with missing
 2. **Fit** on bouts through 2022-12-31 only: Elo parameters by log loss of pre-fight predictions (`elo.py`), the league-average stat line used as a prior for opponent baselines (`adjust.py`), and the weight-class mean rates that per-minute rates are shrunk toward (`shrink.py`).
 3. **Build** one date at a time (`build.py`). Features for every bout on a date are computed from a store that holds earlier dates only; the date's bouts are added afterwards. Each bout enters the store as one vector of additive counts per fighter, and each fighter keeps running sums of those vectors (`components.py`, `store.py`), so career, last-3, last-5 and time-decayed rates are lookups.
 4. **Assemble** each bout's row (`fighter.py`, `matchup.py`): every `d_` feature is fighter A's value minus fighter B's, or a pair value minus its mirror image, so swapping the fighters negates it exactly. Three `lvl_` columns are the mean of the two fighters' age, UFC fights and Elo, which swapping leaves exactly unchanged.
-5. **Write** `features.parquet` (identity, bout context, `label`, four per-fighter flags, the `d_` features, then the `lvl_` columns) and `features_meta.json` (snapshot commit, settings, fitted parameters, ordered feature list, feature-to-family map for the thirteen families, and the level columns).
+5. **Write** `features.parquet` (identity, bout context, `label`, six per-fighter flags, the `d_` features, then the `lvl_` columns) and `features_meta.json` (snapshot commit, settings, fitted parameters, ordered feature list, feature-to-family map for the thirteen families, and the level columns).
 
 `build_matchup(store, fighter_a_id, fighter_b_id, date, weight_class)` returns the same features for any pair and date, real or hypothetical, plus each fighter's own as-of values for display. It reads histories through one lookup that returns only bouts strictly before the date. The batch build calls the same code, and a test checks that both give identical rows for every bout.
 
 Design choices are in DECISIONS D23 to D29 and D31 to D34.
+
+## Models (`src/ufc/models/`)
+
+```
+uv run python -m ufc.models train       # select on validation, save the candidate to the registry
+uv run python -m ufc.models evaluate    # score the saved candidate on the test period; walk-forward backtest
+uv run python -m ufc.models report      # write the generated part of docs/MODEL_REPORT.md
+```
+
+1. **Splits** (`splits.py`): train through 2022-12-31, validation 2023 to 2024, test from 2025. All rows reach model code through `Splits`, which refuses test-period rows until `evaluate` unlocks them for a saved candidate. Fitting uses bouts with a winner and no attribute gap (D44).
+2. **Inference** (`design.py`, `symmetric.py`): a model is asked about (A, B) and (B, A); the two answers are averaged and calibrated in a way that makes P(A) + P(B) exactly 1 and swaps exactly when the fighters swap (D36).
+3. **Baselines** (`baselines.py`): Elo probability from the stored rating difference, and a logistic regression on the standardized difference features.
+4. **Candidates** (`gbm.py`, `recipe.py`): XGBoost and LightGBM on both orientations of every training bout, with optional recency weights; trees chosen by early stopping on validation; calibrator fitted on validation (`calibrate.py`).
+5. **Selection** (`tune.py`, `select.py`), all on validation: rate-shrinkage strength, level features, hyperparameter search, half-life and library, calibration method, then the feature-family ablation (D38). `train` writes the chosen feature table to `data/features/` and the record of every comparison to `data/reports/eval/selection.json`.
+6. **Registry** (`registry.py`): `data/models/{version}/` holds the booster, calibrator, feature list, training configuration, feature settings and fitted parameters, validation metrics, and a manifest with the git commit and data hashes. `data/models/approved.json` (`{"version": "..."}`) is written by hand; no code writes it (D4, D42).
+7. **Evaluation** (`evaluate.py`, `walkforward.py`, `plots.py`): `evaluate` loads the saved candidate, scores it and the baselines once on the test period, runs the yearly walk-forward backtest, and writes `test_metrics.json`, `walk_forward.json` and plots under `data/reports/eval/`.
+8. **Report** (`report.py`): `docs/MODEL_REPORT.md` has a generated block built only from those JSON files.
+
+Design choices are in DECISIONS D35 to D44.
 
 ## Handling card changes
 
