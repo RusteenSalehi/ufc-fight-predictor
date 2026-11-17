@@ -41,6 +41,11 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - `src/ufc/features/`: as-of store, Elo, per-fighter features for families 1 to 12 (style archetypes excluded), opponent adjustment, matchup assembly. `build_matchup` gives the same features for a hypothetical bout from two fighter IDs and a date.
 - Tests: perturbation, same-event, symmetry, and a hand-calculated spot check on four real bouts (read from `data/external/greco/` at test time; skipped if absent). Design choices are in DECISIONS D23 to D29.
 
+## M2 (Sonnet 5.5, medium effort): done
+
+- `scripts/data_quality.py` reads `data/ufc.db` and writes the generated block of `docs/DATA_QUALITY.md`: attribute completeness by activity and debut date, freshness against today, per-year coverage, duplicates, `ingest_issues`, dropped-bout evidence and event gaps. Tested in `tests/test_data_quality.py`.
+- Findings and the review of dropped bouts and name resolutions are in `docs/DATA_QUALITY.md`; no override was added (DECISIONS D30).
+
 ## M2 prompt (Sonnet 5.5, medium effort)
 
 ```
