@@ -61,7 +61,9 @@ def test_final_booster_is_fitted_on_every_bout_without_a_gap(data, result):
     assert list(result.final_rows["bout_id"]) == list(expected["bout_id"])
     assert result.final_rows["date"].max() >= np.datetime64("2026-01-01")
     own, _ = fit_params(
-        list(data.bouts), FeatureConfig(train_end=last, shrink_minutes=15.0)
+        list(data.bouts),
+        FeatureConfig(train_end=last, shrink_minutes=15.0),
+        data.fighters,
     )
     assert result.final.params.elo == own.elo
 
@@ -71,7 +73,9 @@ def test_calibrator_is_fitted_out_of_time_by_a_model_fitted_through_2024(data, r
     assert cal["model_fitted_through"] == "2024-12-31"
     assert cal["fitted_on"][0] >= "2025-01-01"
     own, _ = fit_params(
-        list(data.bouts), FeatureConfig(train_end=CALIBRATION_END, shrink_minutes=15)
+        list(data.bouts),
+        FeatureConfig(train_end=CALIBRATION_END, shrink_minutes=15),
+        data.fighters,
     )
     assert cal["elo_params"] == own.elo.to_dict()
 

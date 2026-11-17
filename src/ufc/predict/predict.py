@@ -64,7 +64,7 @@ def feature_store(
 
 
 def model_inputs(matchup: Matchup, names: tuple[str, ...]) -> pd.DataFrame:
-    values = {**matchup.features, **matchup.levels}
+    values = {**matchup.features, **matchup.levels, **matchup.candidates}
     missing = [n for n in names if n not in values]
     if missing:
         raise ValueError(f"the matchup lacks model inputs: {missing}")

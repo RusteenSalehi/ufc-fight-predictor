@@ -84,7 +84,14 @@ class Feature(NamedTuple):
     family: str
 
 
-_DIFFED = [f for f in FIGHTER_FEATURES if f.family != "aux"]
+CANDIDATE_FAMILIES: tuple[str, ...] = ("schedule", "age_shape")
+"""Families added by the M4.5 revision as candidates (D54, D55): "schedule"
+is the proposed family 14 (strength of schedule), "age_shape" the age-shape
+terms. Their columns are written to the feature table and to ``Matchup``,
+but they are not in ``FEATURES``: a model reads them only if its feature list
+names them, and ``train`` does not add them."""
+
+_DIFFED = [f for f in FIGHTER_FEATURES if f.family not in ("aux", *CANDIDATE_FAMILIES)]
 _DIFF_IDX = np.array([POS[f.name] for f in _DIFFED])
 _OFFENSE_IDX = np.array([POS[p.offense] for p in PAIRS])
 _DEFENSE_IDX = np.array([POS[p.defense] for p in PAIRS])
@@ -148,12 +155,31 @@ LEVEL_NAMES: tuple[str, ...] = tuple(level.name for level in LEVELS)
 
 _LEVEL_IDX = np.array([POS[level.source] for level in LEVELS])
 
+_CANDIDATE_DIFFED = [f for f in FIGHTER_FEATURES if f.family in CANDIDATE_FAMILIES]
+_CANDIDATE_DIFF_IDX = np.array([POS[f.name] for f in _CANDIDATE_DIFFED])
+CANDIDATE_FEATURES: tuple[Feature, ...] = tuple(
+    Feature(f"d_{f.name}", f.family) for f in _CANDIDATE_DIFFED
+)
+CANDIDATE_FEATURE_NAMES: tuple[str, ...] = tuple(f.name for f in CANDIDATE_FEATURES)
+"""Antisymmetric candidate columns (A minus B), written after the level
+columns."""
+
+CANDIDATE_LEVELS: tuple[Level, ...] = (Level("lvl_age_rel_class", "age_rel_class"),)
+CANDIDATE_LEVEL_NAMES: tuple[str, ...] = tuple(lv.name for lv in CANDIDATE_LEVELS)
+"""Swap-invariant candidate columns, written last. ``lvl_age_rel_class`` is
+the bout's mean age minus the class's median age: an old bout for its
+division. (The difference of the two fighters' ages relative to the median
+would be exactly ``d_age``: the median is the same for both.)"""
+_CANDIDATE_LEVEL_IDX = np.array([POS[lv.source] for lv in CANDIDATE_LEVELS])
+CANDIDATE_NAMES: tuple[str, ...] = (*CANDIDATE_FEATURE_NAMES, *CANDIDATE_LEVEL_NAMES)
+
 
 class MatchupArrays(NamedTuple):
     a: np.ndarray  # fighter A's own values, in FIGHTER_FEATURES order
     b: np.ndarray
     features: np.ndarray  # FEATURES order; negated when the fighters swap
     levels: np.ndarray  # LEVELS order; unchanged when the fighters swap
+    candidates: np.ndarray  # CANDIDATE_NAMES order: differences, then levels
 
 
 def _pair_values(offense: np.ndarray, defense: np.ndarray) -> np.ndarray:
@@ -179,7 +205,13 @@ def matchup_arrays(
     # a + b and b + a are the same floating-point number, so this is exactly
     # the same whichever fighter is listed first.
     levels = (a[_LEVEL_IDX] + b[_LEVEL_IDX]) / 2.0
-    return MatchupArrays(a, b, features, levels)
+    candidates = np.concatenate(
+        (
+            a[_CANDIDATE_DIFF_IDX] - b[_CANDIDATE_DIFF_IDX],
+            (a[_CANDIDATE_LEVEL_IDX] + b[_CANDIDATE_LEVEL_IDX]) / 2.0,
+        )
+    )
+    return MatchupArrays(a, b, features, levels, candidates)
 
 
 def flags_from(a: np.ndarray, b: np.ndarray) -> tuple[bool, ...]:
@@ -200,9 +232,9 @@ def flags_from(a: np.ndarray, b: np.ndarray) -> tuple[bool, ...]:
 class Matchup:
     """Features for one bout, with the per-fighter values they came from.
 
-    ``features`` and, if the model uses them, ``levels`` are what a model
-    consumes. ``a`` and ``b`` hold each fighter's own as-of values (for
-    display and explanation).
+    ``features`` and, if the model uses them, ``levels`` and
+    ``candidates`` are what a model consumes. ``a`` and ``b`` hold each
+    fighter's own as-of values (for display and explanation).
     """
 
     fighter_a_id: str
@@ -214,6 +246,7 @@ class Matchup:
     flags: dict[str, bool]
     a: dict[str, float]
     b: dict[str, float]
+    candidates: dict[str, float]
 
 
 def build_matchup(
@@ -230,7 +263,7 @@ def build_matchup(
     profile has unknown physical attributes. Without ``weight_class`` the
     weight-change features are NaN.
     """
-    a, b, features, levels = matchup_arrays(
+    a, b, features, levels, candidates = matchup_arrays(
         store, fighter_a_id, fighter_b_id, on.toordinal(), weight_class
     )
     names = [f.name for f in FIGHTER_FEATURES]
@@ -244,4 +277,5 @@ def build_matchup(
         flags=dict(zip(FLAG_NAMES, flags_from(a, b), strict=True)),
         a=dict(zip(names, a.tolist(), strict=True)),
         b=dict(zip(names, b.tolist(), strict=True)),
+        candidates=dict(zip(CANDIDATE_NAMES, candidates.tolist(), strict=True)),
     )

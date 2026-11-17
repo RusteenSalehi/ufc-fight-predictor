@@ -4,8 +4,8 @@ younger opponents, and do candidate features fix it?
     uv run python -m ufc.models.revision run --variants base
     uv run python -m ufc.models.revision run --variants base,schedule,age_shape,...
 
-Analysis only: nothing here saves a model, writes the registry or touches
-``approved.json``. Two kinds of evidence, kept apart in the output:
+Analysis only: nothing here saves a model, writes the registry or changes
+which model is live. Two kinds of evidence, kept apart in the output:
 
 - **Validation (2023 to 2024), candidate pipeline.** Feature parameters and
   models fitted through 2022, trees chosen by early stopping on validation,

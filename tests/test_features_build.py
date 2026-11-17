@@ -22,6 +22,7 @@ from ufc.features.build import (
 from ufc.features.config import TRAIN_END, FeatureConfig
 from ufc.features.data import load_feature_data
 from ufc.features.matchup import (
+    CANDIDATE_NAMES,
     FAMILIES,
     FEATURE_NAMES,
     FEATURES,
@@ -58,6 +59,7 @@ def test_one_row_per_bout_in_date_order_with_the_documented_columns(data, built)
         *FLAG_NAMES,
         *FEATURE_NAMES,
         *LEVEL_NAMES,
+        *CANDIDATE_NAMES,
     ]
     assert list(frame["bout_id"]) == [b.bout_id for b in data.bouts]
     assert frame["date"].is_monotonic_increasing

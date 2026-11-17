@@ -78,6 +78,7 @@ def test_fold_refits_feature_parameters_on_its_own_training_period(data):
     own_params, _ = fit_params(
         list(data.bouts),
         FeatureConfig(train_end=date(2021, 12, 31), shrink_minutes=15.0),
+        data.fighters,
     )
     assert fold["elo_params"] == own_params.elo.to_dict()
     assert set(fold["metrics"]) == {"model", "model_uncalibrated", "elo", "logistic"}

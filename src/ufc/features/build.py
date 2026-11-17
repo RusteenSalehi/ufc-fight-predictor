@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -18,10 +19,16 @@ import numpy as np
 import pandas as pd
 
 from ufc.features.adjust import fit_league_baseline
+from ufc.features.age import fit_age_medians
 from ufc.features.config import FeatureConfig
-from ufc.features.data import BoutFacts, FeatureData
+from ufc.features.data import BoutFacts, FeatureData, FighterAttrs
 from ufc.features.elo import EloFit, by_date, fit_elo_params
 from ufc.features.matchup import (
+    CANDIDATE_FAMILIES,
+    CANDIDATE_FEATURE_NAMES,
+    CANDIDATE_FEATURES,
+    CANDIDATE_LEVEL_NAMES,
+    CANDIDATE_NAMES,
     FAMILIES,
     FEATURE_NAMES,
     FEATURES,
@@ -70,14 +77,22 @@ class FeatureBuild:
 
 
 def fit_params(
-    bouts: list[BoutFacts], config: FeatureConfig
+    bouts: list[BoutFacts],
+    config: FeatureConfig,
+    fighters: Mapping[str, FighterAttrs],
 ) -> tuple[FittedParams, EloFit]:
-    """Fit everything that is fitted, on bouts through ``config.train_end``."""
+    """Fit everything that is fitted, on bouts through ``config.train_end``.
+
+    ``fighters`` gives the dates of birth for the classes' median ages."""
     elo_fit = fit_elo_params(bouts, config.train_end)
     league = fit_league_baseline(bouts, config.train_end)
     rate_priors = fit_rate_priors(bouts, config.train_end)
+    age_medians = fit_age_medians(bouts, fighters, config.train_end)
     return FittedParams(
-        elo=elo_fit.params, league=league, rate_priors=rate_priors
+        elo=elo_fit.params,
+        league=league,
+        rate_priors=rate_priors,
+        age_medians=age_medians,
     ), elo_fit
 
 
@@ -102,18 +117,19 @@ def build_features(
     bouts = list(data.bouts)
     elo_fit = None
     if params is None:
-        params, elo_fit = fit_params(bouts, config)
+        params, elo_fit = fit_params(bouts, config, data.fighters)
 
     store = FeatureStore(data.fighters, config, params)
     context: list[tuple] = []
     flags: list[tuple] = []
     values: list[np.ndarray] = []
     levels: list[np.ndarray] = []
+    candidates: list[np.ndarray] = []
     for day, day_bouts in by_date(bouts):
         ordinal = day.toordinal()
         # Phase 1: features for this date, from earlier dates only.
         for bout in day_bouts:
-            a, b, features, level_values = matchup_arrays(
+            a, b, features, level_values, candidate_values = matchup_arrays(
                 store, bout.fighter_a_id, bout.fighter_b_id, ordinal, bout.weight_class
             )
             context.append(
@@ -134,6 +150,7 @@ def build_features(
             flags.append(flags_from(a, b))
             values.append(features)
             levels.append(level_values)
+            candidates.append(candidate_values)
         # Phase 2: only now does this date become history.
         store.commit_date(day, day_bouts)
 
@@ -153,7 +170,13 @@ def build_features(
         np.array(levels).reshape(len(levels), len(LEVEL_NAMES)),
         columns=list(LEVEL_NAMES),
     )
-    frame = pd.concat([frame, flag_frame, feature_frame, level_frame], axis=1)
+    candidate_frame = pd.DataFrame(
+        np.array(candidates).reshape(len(candidates), len(CANDIDATE_NAMES)),
+        columns=list(CANDIDATE_NAMES),
+    )
+    frame = pd.concat(
+        [frame, flag_frame, feature_frame, level_frame, candidate_frame], axis=1
+    )
     return FeatureBuild(frame=frame, store=store, params=params, elo_fit=elo_fit)
 
 
@@ -171,6 +194,7 @@ def mirror(frame: pd.DataFrame) -> pd.DataFrame:
         other = ("b_" if name.startswith("a_") else "a_") + name[2:]
         swapped[name] = frame[other]
     swapped[list(FEATURE_NAMES)] = -frame[list(FEATURE_NAMES)]
+    swapped[list(CANDIDATE_FEATURE_NAMES)] = -frame[list(CANDIDATE_FEATURE_NAMES)]
     swapped["label"] = 1.0 - frame["label"]
     return swapped
 
@@ -216,6 +240,11 @@ def build_meta(build: FeatureBuild, source_commit: str | None) -> dict:
             for family in FAMILIES
         },
         "level_features": list(LEVEL_NAMES),
+        "candidate_families": {
+            family: [f.name for f in CANDIDATE_FEATURES if f.family == family]
+            for family in CANDIDATE_FAMILIES
+        },
+        "candidate_level_features": list(CANDIDATE_LEVEL_NAMES),
         "shrunk_features": list(SHRUNK_FEATURE_NAMES),
     }
     if build.elo_fit is not None:

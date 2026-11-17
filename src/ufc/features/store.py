@@ -16,6 +16,7 @@ from datetime import date
 
 import numpy as np
 
+from ufc.features.age import AgeMedians
 from ufc.features.components import (
     COMPONENTS,
     N_COMPONENTS,
@@ -37,26 +38,35 @@ class FittedParams:
     with stats; it is the prior for opponent baselines. ``rate_priors`` holds
     the weight-class average rates that per-minute rates are shrunk toward;
     it is only needed when ``FeatureConfig.shrink_minutes`` is positive.
+    ``age_medians`` holds each weight class's median age, for the age-shape
+    candidates (D55). Parameters saved before M4.5 do not have it, and the
+    candidates are then NaN; no model fitted before M4.5 reads them.
     """
 
     elo: EloParams
     league: np.ndarray
     rate_priors: RatePriors | None = None
+    age_medians: AgeMedians | None = None
 
     def to_dict(self) -> dict:
-        return {
+        out = {
             "elo": self.elo.to_dict(),
             "league": dict(zip(COMPONENTS, self.league.tolist(), strict=True)),
             "rate_priors": self.rate_priors.to_dict() if self.rate_priors else None,
         }
+        if self.age_medians is not None:
+            out["age_medians"] = self.age_medians.to_dict()
+        return out
 
     @classmethod
     def from_dict(cls, raw: Mapping) -> FittedParams:
         priors = raw.get("rate_priors")
+        medians = raw.get("age_medians")
         return cls(
             elo=EloParams(**raw["elo"]),
             league=np.array([raw["league"][name] for name in COMPONENTS], dtype=float),
             rate_priors=RatePriors.from_dict(priors) if priors else None,
+            age_medians=AgeMedians.from_dict(medians) if medians else None,
         )
 
 
@@ -72,6 +82,8 @@ class FighterHistory:
         "cum",
         "cum_w",
         "dates",
+        "elo_opp",
+        "elo_own",
         "opp_ids",
         "outcomes",
         "rows",
@@ -90,6 +102,9 @@ class FighterHistory:
         self.opp_ids: list[str] = []
         self.outcomes: list[str] = []
         self.weight_classes: list[str | None] = []
+        # Both ratings from before the bout's date (strength of schedule).
+        self.elo_own: list[float] = []
+        self.elo_opp: list[float] = []
         self.vs: dict[str, list[int]] = {}
 
     def index_before(self, ordinal: int) -> int:
@@ -104,6 +119,8 @@ class FighterHistory:
         opponent_id: str,
         outcome: str,
         weight_class: str | None,
+        elo_own: float = float("nan"),
+        elo_opp: float = float("nan"),
     ) -> None:
         self.vs.setdefault(opponent_id, []).append(len(self.dates))
         self.dates.append(ordinal)
@@ -114,6 +131,8 @@ class FighterHistory:
         self.opp_ids.append(opponent_id)
         self.outcomes.append(outcome)
         self.weight_classes.append(weight_class)
+        self.elo_own.append(elo_own)
+        self.elo_opp.append(elo_opp)
 
 
 _NO_HISTORY = FighterHistory()
@@ -148,6 +167,12 @@ class FeatureStore:
     def decay_weight(self, ordinal: int) -> float:
         return 2.0 ** ((ordinal - DECAY_ORIGIN) / self.config.decay_half_life_days)
 
+    def age_median(self, weight_class: str | None) -> float:
+        """Median age of ``weight_class`` on the training period; NaN when
+        the parameters were saved without age medians."""
+        medians = self.params.age_medians
+        return float("nan") if medians is None else medians.for_class(weight_class)
+
     def shrink_prior(self, weight_class: str | None) -> np.ndarray | None:
         """``shrink_minutes`` average minutes of ``weight_class`` as a
         component vector, or ``None`` when shrinkage is off."""
@@ -178,6 +203,8 @@ class FeatureStore:
                     opponent_id,
                     outcome_for(bout, fighter_id),
                     bout.weight_class,
+                    self.elo.rating(fighter_id),
+                    self.elo.rating(opponent_id),
                 )
         self.elo.commit_date(ordinal, bouts)
         self.last_date = day

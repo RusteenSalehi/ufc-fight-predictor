@@ -29,7 +29,11 @@ from ufc.features.adjust import (
     adjusted_stats,
 )
 from ufc.features.components import IDX
-from ufc.features.config import WINDOWS, weight_limit_lbs
+from ufc.features.config import (
+    WINDOWS,
+    resolve_catch_weights,
+    weight_limit_lbs,
+)
 from ufc.features.shrink import RATE_COMPONENTS
 from ufc.features.store import FeatureStore, FighterHistory
 
@@ -133,6 +137,16 @@ SCALARS: tuple[tuple[str, str], ...] = (
     # Not differenced: inputs to pair features and flags.
     ("stance_orthodox", "aux"),
     ("no_stats", "aux"),
+    # M4.5 candidates (D55). Their difference features are written to the
+    # table beside the model features but are not in FEATURES, so no model
+    # selected before M4.5 reads them and ``train`` does not add them.
+    ("best_win_elo", "schedule"),
+    ("worst_loss_elo", "schedule"),
+    ("wins_vs_higher", "schedule"),
+    ("losses_vs_higher", "schedule"),
+    ("age_past_32", "age_shape"),
+    ("age_past_class_median", "age_shape"),
+    ("age_rel_class", "aux"),  # source of a candidate level column
 )
 
 
@@ -245,17 +259,62 @@ def _cardio(out: np.ndarray, career: np.ndarray, decay: np.ndarray) -> None:
 
 
 def _weight_change(
-    out: np.ndarray, history: FighterHistory, idx: int, weight_class: str | None
+    out: np.ndarray,
+    history: FighterHistory,
+    idx: int,
+    weight_class: str | None,
+    catch_weight_adjacent: bool = False,
 ) -> None:
+    classes = history.weight_classes[:idx]
+    if catch_weight_adjacent:
+        classes, weight_class = resolve_catch_weights(classes, weight_class)
     limit = weight_limit_lbs(weight_class)
-    previous = weight_limit_lbs(history.weight_classes[idx - 1]) if idx else None
+    previous = weight_limit_lbs(classes[idx - 1]) if idx else None
     if limit is not None and previous is not None:
         out[POS["moved_up"]] = float(limit > previous)
         out[POS["moved_down"]] = float(limit < previous)
     if weight_class is not None:
         out[POS["fights_at_weight"]] = float(
-            sum(1 for wc in history.weight_classes[:idx] if wc == weight_class)
+            sum(1 for wc in classes if wc == weight_class)
         )
+
+
+def _schedule(out: np.ndarray, history: FighterHistory, idx: int) -> None:
+    """Strength of schedule from both ratings before each earlier bout.
+
+    Best win: the highest rating of an opponent he beat; worst loss: the
+    lowest rating of one he lost to (NaN without a win or a loss). The counts
+    are wins and losses against opponents then rated above him. Draws and no
+    contests count in neither.
+    """
+    best, worst = -np.inf, np.inf
+    wins_up = losses_up = 0
+    for i in range(idx):
+        outcome, opp = history.outcomes[i], history.elo_opp[i]
+        above = opp > history.elo_own[i]
+        if outcome == "win":
+            best = max(best, opp)
+            wins_up += above
+        elif outcome == "loss":
+            worst = min(worst, opp)
+            losses_up += above
+    out[POS["best_win_elo"]] = best if np.isfinite(best) else NAN
+    out[POS["worst_loss_elo"]] = worst if np.isfinite(worst) else NAN
+    out[POS["wins_vs_higher"]] = float(wins_up)
+    out[POS["losses_vs_higher"]] = float(losses_up)
+
+
+def _age_shape(out: np.ndarray, store: FeatureStore, weight_class: str | None) -> None:
+    """Years past 32 and past the class's median age (NaN without an age).
+    The class is the bout's, so both fighters are measured against the same
+    median; ``age_rel_class`` feeds a level column (D55)."""
+    age = out[POS["age"]]
+    relative = age - store.age_median(weight_class)
+    out[POS["age_past_32"]] = np.fmax(age - 32.0, 0.0) if not np.isnan(age) else NAN
+    out[POS["age_past_class_median"]] = (
+        np.fmax(relative, 0.0) if not np.isnan(relative) else NAN
+    )
+    out[POS["age_rel_class"]] = relative
 
 
 def fighter_vector(
@@ -318,10 +377,12 @@ def fighter_vector(
         out[POS["days_since_last"]] = float(ordinal - history.dates[idx - 1])
     since = ordinal - store.config.recent_days
     out[POS["fights_last_2y"]] = float(idx - bisect_left(history.dates, since, 0, idx))
-    _weight_change(out, history, idx, weight_class)
+    _weight_change(out, history, idx, weight_class, store.config.catch_weight_adjacent)
     out[POS["elo"]] = store.elo.rating_before(fighter_id, ordinal)
     out[POS["debut"]] = float(idx == 0)
     out[POS["no_stats"]] = float(not has_stats)
     _cardio(out, career, decay)
+    _schedule(out, history, idx)
+    _age_shape(out, store, weight_class)
     out[_SL_ADJUSTED] = adjusted_stats(store, fighter_id, history, idx, ordinal)
     return out

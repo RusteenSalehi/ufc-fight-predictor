@@ -31,19 +31,27 @@ def data():
     return random_league().data()
 
 
-@pytest.fixture(scope="module", params=[0.0, 12.0], ids=["plain", "shrunk"])
+@pytest.fixture(
+    scope="module",
+    params=[(0.0, False), (12.0, False), (12.0, True)],
+    ids=["plain", "shrunk", "catch_adjacent"],
+)
 def config(data, request):
     """Training ends about 60% of the way through the league's history. Every
-    test runs with rate shrinkage off and on."""
+    test runs with rate shrinkage off and on, and with catch-weight bouts
+    resolved to adjacent divisions (an M4.5 candidate setting, D55). The
+    frames compared include the M4.5 candidate columns."""
+    shrink, catch = request.param
     return FeatureConfig(
         train_end=data.bouts[int(len(data.bouts) * 0.6)].date,
-        shrink_minutes=request.param,
+        shrink_minutes=shrink,
+        catch_weight_adjacent=catch,
     )
 
 
 @pytest.fixture(scope="module")
 def params(data, config):
-    return fit_params(list(data.bouts), config)[0]
+    return fit_params(list(data.bouts), config, data.fighters)[0]
 
 
 @pytest.fixture(scope="module")
@@ -145,6 +153,8 @@ def test_perturbation_with_fitting_included(data, config, built, params):
     assert changed.params.elo == params.elo
     np.testing.assert_array_equal(changed.params.league, params.league)
     assert changed.params.rate_priors.to_dict() == params.rate_priors.to_dict()
+    assert changed.params.age_medians == params.age_medians
+    assert params.age_medians is not None
     pd.testing.assert_frame_equal(
         rows_through(changed.frame, config.train_end),
         rows_through(built.frame, config.train_end),
@@ -155,6 +165,8 @@ def test_perturbation_with_fitting_included(data, config, built, params):
     assert truncated.params.elo == params.elo
     np.testing.assert_array_equal(truncated.params.league, params.league)
     assert truncated.params.rate_priors.to_dict() == params.rate_priors.to_dict()
+    assert truncated.params.age_medians == params.age_medians
+    assert params.age_medians is not None
 
 
 def _same_event_dates(data) -> list[date]:

@@ -217,7 +217,7 @@ def test_shrinkage_uses_the_class_of_the_bout_being_predicted():
 def test_zero_minutes_is_exactly_the_unshrunk_build_and_only_rates_change():
     data = random_league(seed=5).data()
     config = FeatureConfig(train_end=data.bouts[150].date)
-    params, _ = fit_params(list(data.bouts), config)
+    params, _ = fit_params(list(data.bouts), config, data.fighters)
     assert params.rate_priors is not None and params.rate_priors.overall.any()
 
     plain = build_features(data, config, params).frame

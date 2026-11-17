@@ -22,6 +22,9 @@ from tests.feature_helpers import (
 from ufc.features.build import CONTEXT_COLUMNS, build_features, mirror
 from ufc.features.config import FeatureConfig
 from ufc.features.matchup import (
+    CANDIDATE_FEATURE_NAMES,
+    CANDIDATE_LEVEL_NAMES,
+    CANDIDATE_NAMES,
     FEATURE_NAMES,
     FEATURES,
     FLAG_NAMES,
@@ -37,9 +40,16 @@ def data():
     return random_league(seed=11).data()
 
 
-@pytest.fixture(scope="module", params=[0.0, 12.0], ids=["plain", "shrunk"])
+@pytest.fixture(
+    scope="module",
+    params=[(0.0, False), (12.0, False), (12.0, True)],
+    ids=["plain", "shrunk", "catch_adjacent"],
+)
 def built(data, request):
-    return build_features(data, FeatureConfig(shrink_minutes=request.param))
+    shrink, catch = request.param
+    return build_features(
+        data, FeatureConfig(shrink_minutes=shrink, catch_weight_adjacent=catch)
+    )
 
 
 def test_swapping_fighters_negates_every_difference_feature_exactly(built):
@@ -60,6 +70,15 @@ def test_swapping_fighters_negates_every_difference_feature_exactly(built):
         np.testing.assert_array_equal(
             np.array([ab.levels[n] for n in LEVEL_NAMES]),
             np.array([ba.levels[n] for n in LEVEL_NAMES]),
+        )
+        # M4.5 candidates: differences negate, the level column does not move.
+        np.testing.assert_array_equal(
+            np.array([ab.candidates[n] for n in CANDIDATE_FEATURE_NAMES]),
+            -np.array([ba.candidates[n] for n in CANDIDATE_FEATURE_NAMES]),
+        )
+        np.testing.assert_array_equal(
+            np.array([ab.candidates[n] for n in CANDIDATE_LEVEL_NAMES]),
+            np.array([ba.candidates[n] for n in CANDIDATE_LEVEL_NAMES]),
         )
         # Each fighter's own values do not depend on which side he is on.
         assert _same_values(ab.a, ba.b) and _same_values(ab.b, ba.a)
@@ -108,6 +127,14 @@ def test_mirror_swaps_flags_and_labels_and_is_its_own_inverse(built):
         mirrored[list(LEVEL_NAMES)], frame[list(LEVEL_NAMES)], check_exact=True
     )
     assert mirrored[list(FEATURE_NAMES)].equals(-frame[list(FEATURE_NAMES)])
+    assert mirrored[list(CANDIDATE_FEATURE_NAMES)].equals(
+        -frame[list(CANDIDATE_FEATURE_NAMES)]
+    )
+    pd.testing.assert_frame_equal(
+        mirrored[list(CANDIDATE_LEVEL_NAMES)],
+        frame[list(CANDIDATE_LEVEL_NAMES)],
+        check_exact=True,
+    )
     pd.testing.assert_frame_equal(mirror(mirrored), frame, check_exact=True)
 
 
@@ -120,6 +147,11 @@ def test_every_model_feature_is_a_difference_and_none_is_an_outcome():
     # Swap-invariant columns are kept apart from the antisymmetric features.
     assert all(name.startswith("lvl_") for name in LEVEL_NAMES)
     assert not set(LEVEL_NAMES) & set(FEATURE_NAMES)
+    # M4.5 candidates are neither model features nor level features, so no
+    # model selected before M4.5 and no run of ``train`` reads them.
+    assert all(name.startswith("d_") for name in CANDIDATE_FEATURE_NAMES)
+    assert all(name.startswith("lvl_") for name in CANDIDATE_LEVEL_NAMES)
+    assert not set(CANDIDATE_NAMES) & (set(FEATURE_NAMES) | set(LEVEL_NAMES))
 
 
 def test_attribute_gap_flags_the_fighter_whose_profile_lacks_what_the_other_has():

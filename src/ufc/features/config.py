@@ -6,6 +6,7 @@ pipeline (``python -m ufc.models train``); its default here is "off".
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 
@@ -41,6 +42,12 @@ class FeatureConfig:
     (minutes + m), which pulls a fighter with little cage time toward the
     average of the weight class. 0 leaves rates as plain pooled rates. The
     model pipeline chooses the value on validation (docs/DECISIONS.md, D33).
+
+    ``catch_weight_adjacent``: in "fights at this weight" and the
+    weight-change features, count a catch-weight bout as the division of the
+    fighter's adjacent bouts (``resolve_catch_weights``) instead of as a
+    class of its own. Off by default, which is the M4 behaviour; the M4.5
+    revision tests it as a variant (docs/DECISIONS.md, D54, D55).
     """
 
     train_end: date = TRAIN_END
@@ -48,6 +55,7 @@ class FeatureConfig:
     prior_fights: float = 2.0
     recent_days: int = 730
     shrink_minutes: float = 0.0
+    catch_weight_adjacent: bool = False
 
     def __post_init__(self) -> None:
         if self.shrink_minutes < 0:
@@ -76,3 +84,37 @@ def weight_limit_lbs(weight_class: str | None) -> float | None:
     if weight_class is None:
         return None
     return _WEIGHT_LIMIT_LBS.get(weight_class.removeprefix("Women's "))
+
+
+CATCH_WEIGHT = "Catch Weight"
+
+
+def _known_class(weight_class: str | None) -> bool:
+    return weight_class is not None and weight_class != CATCH_WEIGHT
+
+
+def resolve_catch_weights(
+    classes: Sequence[str | None], weight_class: str | None
+) -> tuple[list[str | None], str | None]:
+    """A fighter's earlier classes and the current bout's class, with catch
+    weights replaced by the division of adjacent bouts.
+
+    ``classes`` are the fighter's bouts strictly before the cutoff, oldest
+    first; nothing later is passed in, so nothing later can be used. A
+    catch-weight bout in that list takes the class of the nearest earlier
+    bout with a known division, or failing that the nearest later one in the
+    list. A catch-weight bout being predicted takes the class of the
+    fighter's nearest earlier bout with a known division. A catch weight with
+    no such neighbour stays a catch weight.
+    """
+    resolved = list(classes)
+    for i, value in enumerate(classes):
+        if value != CATCH_WEIGHT:
+            continue
+        earlier = next((c for c in reversed(classes[:i]) if _known_class(c)), None)
+        later = next((c for c in classes[i + 1 :] if _known_class(c)), None)
+        resolved[i] = earlier or later or value
+    current = weight_class
+    if weight_class == CATCH_WEIGHT:
+        current = next((c for c in reversed(classes) if _known_class(c)), weight_class)
+    return resolved, current
