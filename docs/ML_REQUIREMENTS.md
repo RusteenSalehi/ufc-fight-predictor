@@ -14,7 +14,7 @@ For a bout between fighters A and B, estimate P(A wins). P(B wins) = 1 - P(A win
 1. **As-of cutoff.** Every feature for a bout on date D uses only bouts from events with date strictly before D. Other bouts on the same event never count.
 2. **No profile aggregates.** Career stats shown on UFCStats fighter pages are never used. Every stat is recomputed from per-fight data as of the cutoff.
 3. **Static attributes.** Height, reach, stance, and date of birth come from current profiles. Assumed effectively static; document this assumption. Age is computed as of the bout date.
-4. **Fit on training data only.** Scalers, imputers, Elo parameters, opponent-adjustment baselines, clustering, calibration, and any other fitted transformation are fit on the training period only (calibration on validation).
+4. **Fit on training data only.** Scalers, imputers, Elo parameters, opponent-adjustment baselines, the weight-class means used for rate shrinkage, clustering, calibration, and any other fitted transformation are fit on the training period only (calibration on validation).
 5. **Tests prove it.** Required tests:
    - Perturbation test: change or delete bouts after date D; features for bouts on or before D must not change.
    - Same-event test: a bout's features are unaffected by other bouts on the same card.
@@ -25,6 +25,7 @@ For a bout between fighters A and B, estimate P(A wins). P(B wins) = 1 - P(A win
 Corner (red/blue) is never a feature; red corner correlates with being the favorite or champion.
 
 - Features are expressed as A-minus-B differences (plus a few non-differenced fields like weight class).
+- Swap-invariant "level" features (the mean of the two fighters' age, UFC fights, and Elo) are allowed because swapping the fighters leaves them exactly unchanged. They are kept in separate `lvl_` columns and enter a model only if they improve validation log loss; the result is reported either way.
 - Training uses both orientations of every bout: (A, B, label) and (B, A, 1 - label).
 - Inference averages P(A beats B) and 1 - P(B beats A).
 - Symmetry test: for any bout, the final P(A) + P(B) = 1 exactly, and swapping inputs swaps outputs.
@@ -33,6 +34,8 @@ Corner (red/blue) is never a feature; red corner correlates with being the favor
 
 All computed as of the cutoff. Where useful, both career and rolling (last 3 and last 5 fights) versions, plus exponentially time-decayed averages.
 
+Per-minute and per-15-minute rates are shrunk toward the weight-class mean: `(count + m * class mean per minute) / (minutes + m)`, using the fighter's counts and minutes as of the cutoff. The class means are fit on the training period only. The prior strength `m` (in cage minutes) is chosen on validation from a small grid that includes 0 (no shrinkage). A fighter with no recorded cage time still has missing rates, not the class mean.
+
 1. **Physical:** age, height, reach, stance matchup (for example orthodox vs southpaw)
 2. **Record and experience:** UFC fights, wins, losses, win rate, finish rate, KO/TKO and submission win counts, title fight experience
 3. **Striking:** sig strikes landed and absorbed per minute, accuracy, defense, knockdowns per 15 minutes, target and position distribution
@@ -40,11 +43,12 @@ All computed as of the cutoff. Where useful, both career and rolling (last 3 and
 5. **Durability:** KO/TKO losses (career and recent), knockdowns absorbed, head strikes absorbed per minute
 6. **Activity:** days since last fight, fights in the last 2 years
 7. **Weight change:** moving up or down from the previous bout's weight class, fights at the current weight
-8. **Opponent quality:** opponents' Elo at the time they fought (mean and recent), from the Elo system below
+8. **Opponent quality:** opponents' Elo at the time they fought (mean and recent), from the Elo system below. The fighter's own rating is family 13, not part of this family.
 9. **Opponent-adjusted stats:** each stat compared with what that fighter's opponents typically allowed or achieved against others, as of the cutoff. Example: if a fighter's opponents usually land 40% of takedown attempts against others but only 20% against him, his adjusted takedown defense is strong. Computed with careful as-of handling, since opponents' baselines must also respect the cutoff.
 10. **Style matchups:** A's offense against B's defense (takedown offense vs takedown defense, strike volume vs striking defense, and so on)
 11. **Debut flag:** fighter has zero prior UFC bouts; their stats are missing, not zero
 12. **Per-round pace and cardio:** from per-round stats, how a fighter's output and defense in rounds 3 and later compare with round 1: significant strikes landed, attempted, and absorbed per minute in rounds 3+ divided by the round-1 rate, and the change in accuracy and defense. Only bouts that went past round 2 are used; the features are NaN for a fighter with no such bout.
+13. **Rating:** the fighter's own Elo rating as of the cutoff. Kept apart from family 8 so that the ablation can tell "how highly is he rated" from "whom has he fought".
 
 ## Recency weighting
 
@@ -59,7 +63,7 @@ Use all history for feature construction. During training, weight samples by rec
 
 ## Baselines
 
-1. Elo rating system (fit on training data; K-factor tuned on validation); prediction from rating difference. Also pick-the-higher-rated-fighter accuracy.
+1. Elo rating system; prediction from rating difference. Also pick-the-higher-rated-fighter accuracy. The Elo parameters (K and its multipliers) are fit on the training period only, and the baseline uses the same as-of ratings that feed the features. Nothing about Elo is tuned on validation. Ratings keep updating after the training period as bouts are completed; only the parameters are frozen.
 2. Logistic regression on the feature set (standardized)
 3. Market odds (normalized implied probability, vig removed) once historical odds are sourced
 
@@ -76,7 +80,7 @@ Calibrate the chosen model on the validation set (isotonic or Platt; pick by val
 - Primary selection metric: log loss
 - Also report: Brier score, accuracy, expected calibration error, reliability diagram
 - Breakdowns: by year, by confidence bucket, debut bouts separately, by weight class only where sample size allows
-- Feature ablation: remove each of the twelve feature families in turn, including family 12 (per-round pace and cardio), and report the change in validation log loss. The feature-to-family map is the `families` entry of `data/features/features_meta.json`.
+- Feature ablation: remove each of the thirteen feature families in turn, including family 12 (per-round pace and cardio) and family 13 (rating), and report the change in validation log loss. The feature-to-family map is the `families` entry of `data/features/features_meta.json`. If the level features are in the model they are ablated as a fourteenth group.
 
 ## Model registry
 
