@@ -18,10 +18,12 @@ What is refitted, and on what:
   same recipe on bouts through 2024-12-31 (its feature parameters too), on
   the bouts from 2025-01-01 on. The final booster is never calibrated on
   bouts it was fitted on.
-- the number of trees, for both models: early stopping inside the model's own
-  window, on its last two years, with the rest as training; then the whole
-  window is fitted with that many trees. For the calibration model this is
-  the candidate's own schedule.
+- the number of trees, for both models: the count the candidate's own
+  schedule chooses (fitted through 2022, early stopping on 2023 and 2024).
+  The calibrator is fitted for a booster of that size, so the final booster
+  has the same size. What early stopping inside the final window would have
+  chosen, and how much sharper that booster would be, is recorded and not
+  used (DECISIONS D47).
 
 After this there is no held-out period left. The only out-of-sample evidence
 for the refitted model is predictions published before events.
@@ -120,8 +122,8 @@ def tree_count(
 ) -> tuple[TreeCount, Candidate]:
     """Early stopping inside a window: fit through ``window_end`` minus two
     years (feature parameters too), stop on the two years after. Returns the
-    count and the fitted model, which for a window ending 2024-12-31 is the
-    candidate's own schedule."""
+    count and the fitted model. For a window ending 2024-12-31 this is the
+    candidate's own schedule, so the count is the candidate's."""
     inner_end = years_before(window_end, STOPPING_YEARS)
     frame = _build(data, config, inner_end).frame
     splits = _splits(frame, inner_end, reason)
@@ -208,11 +210,14 @@ def refit(
     calibrator = fit_calibrator(PLATT, p_later[~gap], y_later[~gap])
     with_gaps = fit_calibrator(PLATT, p_later, y_later)
 
-    # 2. The final booster: everything fitted through the latest event.
-    final_count, _ = tree_count(data, recipe, config, last, reason)
+    # 2. The final booster: everything fitted through the latest event, with
+    # as many trees as the model the calibrator was fitted for.
     final = _build(data, config, last)
     final_rows = fit_rows(_splits(final.frame, last, reason).train())
-    final_model = fit_fixed(recipe, final_rows, final_count.n_trees, last)
+    final_model = fit_fixed(recipe, final_rows, cal_count.n_trees, last)
+    # Recorded, not used: early stopping inside the final window.
+    stopped_count, _ = tree_count(data, recipe, config, last, reason)
+    stopped_model = fit_fixed(recipe, final_rows, stopped_count.n_trees, last)
 
     # How much sharper the final booster is than the one the slope was fitted
     # for, on the bouts both were fitted on, each from its own feature table.
@@ -224,10 +229,14 @@ def refit(
             cal_model, cal_train, recipe
         ),
         "final_model_mean_abs_logit": _mean_abs_logit(final_model, shared, recipe),
+        "not_used_stopped_model_mean_abs_logit": _mean_abs_logit(
+            stopped_model, shared, recipe
+        ),
     }
-    sharpness["ratio"] = (
-        sharpness["final_model_mean_abs_logit"]
-        / sharpness["calibration_model_mean_abs_logit"]
+    base = sharpness["calibration_model_mean_abs_logit"]
+    sharpness["ratio"] = sharpness["final_model_mean_abs_logit"] / base
+    sharpness["not_used_stopped_model_ratio"] = (
+        sharpness["not_used_stopped_model_mean_abs_logit"] / base
     )
 
     calibration = {
@@ -249,7 +258,7 @@ def refit(
         "Platt slope %.4f on %d out-of-time bouts; final booster %d trees on %d bouts",
         calibrator.slope,
         calibration["n_bouts"],
-        final_count.n_trees,
+        final_model.n_trees,
         len(final_rows),
     )
     return Refit(
@@ -259,11 +268,13 @@ def refit(
         calibration=calibration,
         trees={
             "rule": (
-                "early stopping on the last two years of the model's window, "
-                "fitted on the rest; then the whole window with that many trees"
+                "the candidate's schedule chooses the count (fit through 2022, "
+                "early stopping on 2023 and 2024); the calibration model and the "
+                "final booster both have that many trees"
             ),
             "calibration_model": cal_count.to_dict(),
-            "final_model": final_count.to_dict(),
+            "final_model": {"n_trees": final_model.n_trees},
+            "not_used_stopping_in_final_window": stopped_count.to_dict(),
         },
         sharpness=sharpness,
     )

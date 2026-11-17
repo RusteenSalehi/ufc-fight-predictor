@@ -104,9 +104,12 @@ def test_calibration_models_tree_count_is_the_candidates_own_schedule(data, resu
     trees = result.trees["calibration_model"]
     assert trees["fitted_through"] == "2022-12-31"
     assert trees["n_trees"] == candidate.model.n_trees
-    final = result.trees["final_model"]
-    assert final["window_end"] == result.final.frame["date"].max().date().isoformat()
-    assert result.candidate.model.n_trees == final["n_trees"]
+    # The final booster has as many trees as the model the slope was fitted for.
+    assert result.trees["final_model"]["n_trees"] == trees["n_trees"]
+    assert result.candidate.model.n_trees == trees["n_trees"]
+    unused = result.trees["not_used_stopping_in_final_window"]
+    assert unused["window_end"] == result.final.frame["date"].max().date().isoformat()
+    assert set(result.sharpness) >= {"ratio", "not_used_stopped_model_ratio"}
 
 
 def test_refit_only_implements_platt():
