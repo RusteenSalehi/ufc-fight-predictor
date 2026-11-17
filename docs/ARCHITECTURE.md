@@ -86,7 +86,7 @@ The dataset covers completed events only. Upcoming cards come from English Wikip
 5. **Staleness** (`staleness.py`, D52): completed events after the dataset's latest; bouts with a fighter on one of them are labelled "stale stats".
 6. **Backfill** (`backfill.py`, `infobox.py`, D51): missing height, reach and date of birth from the linked article's infobox, for predictions only.
 7. **Predictions** (`predict.py`, D53): the approved model, the feature settings and fitted parameters stored with it, `build_matchup` at the event date. New rows only when inputs change.
-8. **Publish** (`publish.py`): the validation gate, then a plain JSON dump of current predictions in `data/publish/predictions.json` (the site's artifact layout is M6).
+8. **Publish** (`publish.py`): the validation gate, then a plain JSON dump of current predictions in `data/publish/predictions.json` (the site's artifact layout is M6). Each bout carries `why`, the plain-language explanation stored with its prediction (D59).
 
 Requests: two to four per refresh (list, event pages, provisional fighters' articles, articles for backfill), one at a time, spaced, cached; see D48. Test fixtures are saved API responses (`tests/fixtures/wikipedia/`, written by `scripts/save_wikipedia_fixtures.py`); no test touches the network.
 
@@ -107,7 +107,7 @@ The schema is `src/ufc/db/schema.sql`. Deviations from the original plan are exp
 - **upcoming_bouts** (M5): bout_id (PK, `wb` + 16 hex from page ID and sorted name keys), event_key, card_order, segment, weight_class_raw, weight_class, is_title_bout, name_a/page_a, name_b/page_b, fighter_a_ref/fighter_b_ref (UFCStats ID or provisional ID; NULL when unresolved), method_a/method_b, unresolved_reason, status (`scheduled` / `cancelled`), first_seen_at, last_seen_at, cancelled_at
 - **provisional_fighters** (M5): provisional_id (PK, `wp:<article>` or `wpname:<name>`), page_title, name, fighter_id (set once linked), first_seen_at, last_seen_at, linked_at
 - **attribute_backfill** (M5): (fighter_ref, field) PK; value, source (`wikipedia`), page_title, revid, fetched_at. Never copied into `fighters`.
-- **predictions** (M5): prediction_id (PK), bout_id (upcoming_bouts), model_version, created_at, event_date, fighter_a_ref, fighter_b_ref, p_fighter_a, p_fighter_b, inputs_sha256, features_json (model inputs, flags, per-fighter values, attribute sources), shap_json (M6), limited_data, limited_reasons_json, is_live, superseded_at, superseded_reason. At most one current (not superseded) row per bout.
+- **predictions** (M5): prediction_id (PK), bout_id (upcoming_bouts), model_version, created_at, event_date, fighter_a_ref, fighter_b_ref, p_fighter_a, p_fighter_b, inputs_sha256, features_json (model inputs, flags, per-fighter values, attribute sources), shap_json (symmetrised SHAP contributions toward fighter A and the `why` explanation built from them, `explain.py`, D59; NULL for rows made before it existed), limited_data, limited_reasons_json, is_live, superseded_at, superseded_reason. At most one current (not superseded) row per bout.
 - **refresh_log** (M5): seq, run_at, level, event_key, message. Append-only.
 
 Loaders are idempotent upserts keyed on UFCStats IDs: running the same load twice produces identical tables. Timestamps come from the snapshot (the upstream commit date), not the clock.
