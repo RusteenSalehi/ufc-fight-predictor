@@ -1,13 +1,16 @@
 # Model report (M4)
 
 Candidate `xgboost-71fab189-44ddd3f0`, selected on validation (2023 to 2024) and scored once on the test
-period (2025-01-11 to 2026-11-14). It has **not** been approved: `data/models/approved.json` does not exist,
-and creating it is a manual step (`{"version": "xgboost-71fab189-44ddd3f0"}`).
+period (2025-01-11 to 2026-11-14). The candidate itself was never approved. Its production refit
+`xgboost-ffc3ca8c-ee729619` is the version `data/models/approved.json` named when this was written
+(2026-11-17); approval is a manual edit of that file. The section "Production model after M4.5" at the end
+names the model proposed to replace it.
 
-The block between the GENERATED markers is rebuilt from the metrics files by the last command below and is
-replaced on every run. Everything above it is written by hand and uses only numbers from that block. The
-"Era-shift diagnostic", "Production refit" and "Model revision M4.5" sections after the block are also
-written by hand, each from the output of its own command.
+The block between the GENERATED markers is rebuilt from the metrics files in `data/reports/eval/` by the
+last command below and is replaced on every run. It describes the M4 candidate. Everything above it is
+written by hand and uses only numbers from that block. The "Era-shift diagnostic", "Production refit",
+"Model revision M4.5" and "Production model after M4.5" sections after the block are also written by hand,
+each from the output of its own commands.
 
     uv run python -m ufc.ingest fetch
     uv run python -m ufc.ingest load
@@ -723,8 +726,8 @@ Written by hand on 2026-11-17 from `data/reports/eval/refit.json`, which one com
 The model that goes live is `xgboost-ffc3ca8c-ee729619`. It is the recipe of the candidate above, refitted
 on every completed bout through 2026-11-14 (DECISIONS D47). It has no held-out test: the validation and
 test periods are now part of its training data. Every number earlier in this report describes the
-candidate `xgboost-71fab189-44ddd3f0` and the recipe, not this model. Nothing has been approved:
-`data/models/approved.json` does not exist.
+candidate `xgboost-71fab189-44ddd3f0` and the recipe, not this model. (When this section was written
+nothing had been approved; the user later approved this refit by hand.)
 
 - **Fitted on:** 7,841 bouts with a winner and no attribute gap; 405 trees. Elo parameters refitted on all
   bouts (K 56, finish multiplier 1.3, against 1.15 for the candidate).
@@ -915,3 +918,75 @@ model that made it and halves the weight of the two years the era-shift diagnost
 point or two are noise, and four variants gave four chances to pass by luck. The backtest years were scored
 with a recipe chosen on 2023 to 2024. Age comes from today's profiles (leakage rule 3). The hypothesis was
 prompted by upcoming bouts, which the analysis does not use but which shaped the question.
+
+
+## Production model after M4.5
+
+Written by hand on 2026-11-17 from `data/reports/m45/` (`selection.json`, `test_metrics.json`,
+`walk_forward.json`, `refit.json`), which three commands write:
+
+    uv run python -m ufc.models train --recipe-of xgboost-71fab189-44ddd3f0 \
+        --reports data/reports/m45 --parent-reports data/reports/eval
+    uv run python -m ufc.models evaluate --reports data/reports/m45
+    uv run python -m ufc.models refit --candidate xgboost-ed7a4d35-852c380d \
+        --reports data/reports/m45 --calibration-window rolling
+
+**Proposed production model: `xgboost-a586af7b-609ecab1`.** It is the production refit of candidate
+`xgboost-ed7a4d35-852c380d`, which is the M4 recipe plus family 15 (age shape), with the Platt slope fitted
+on the rolling 2023 to 2026 window. It is not approved; the live model is still `xgboost-ffc3ca8c-ee729619`
+until `approved.json` is edited by hand (DECISIONS D58).
+
+**Why.** The M4.5 rule, fixed before any variant was run, selects `age_shape` (D54, D56), and the user
+chose to adopt it. The pass is weak, and nothing below makes it stronger: the case for this model is that
+the decision was made by a pre-registered rule, not that it scores better. The rolling calibration window is
+a judgment (D57): every bout in it is out of time for the model that predicted it, it has twice the bouts,
+and it halves the weight of 2025 to 2026, which the era-shift diagnostic could not explain.
+
+**The candidate `xgboost-ed7a4d35-852c380d`.** Library, settings, half-life (8 years), shrinkage (15 cage
+minutes), level features and Platt calibration are the M4 candidate's; nothing was re-tuned. Fitted through
+2022, 307 trees by early stopping on 2023 to 2024 (the M4 candidate has 405), 139 inputs. Its validation
+log loss, uncalibrated and averaged over five seeds, is 0.6367, which is the M4.5 `age_shape` figure to
+every digit recorded, so the saved candidate is the variant the rule judged. Cross-validated Platt
+calibration chose Platt again (0.6360, against 0.6353 for the M4 candidate; slope 1.232). Against the logistic baseline on the same inputs:
+-0.0005 (-0.0085 to +0.0074); against Elo -0.0414 (-0.0564 to -0.0265).
+
+**Ablation, rerun with family 15.** Only opponent quality helps with an interval that excludes zero,
++0.0029 (+0.0003 to +0.0055); opponent-adjusted stats are just short of it, +0.0038 (-0.0000 to +0.0075).
+Removing family 15 changes validation log loss by -0.0011 (-0.0036 to +0.0013); that is the M4.5 result
+seen from the other side. **Physical drops from +0.0115 in M4 to -0.0004 (-0.0034 to +0.0026)**: with
+the age-shape columns present, removing the physical family no longer removes the information about age,
+so its separate contribution vanishes. This is the overlap problem the M4 ablation already warned about,
+not evidence that height, reach and age stopped mattering.
+
+**Test period, already seen.** `evaluate` was run once on this candidate. **The test period had been
+opened before, for `xgboost-71fab189-44ddd3f0`, and the record says so; these numbers are not a held-out
+result.** On 1,013 bouts: log loss 0.6228, Brier 0.2165, accuracy 65.1% (the M4 candidate: 0.6216, 65.8%).
+Logistic regression 0.6257, Elo 0.6788. Symmetry exact on all 1,026 bouts. Walk-forward backtest, same
+schedule as M4: 2013 to 2024 pooled 0.6608 (M4 recipe 0.6619); the 2025 to 2026 folds 0.6210 (M4 recipe
+0.6188). The 2025 fold reproduces the candidate's probabilities exactly.
+
+**The refit `xgboost-a586af7b-609ecab1`.**
+
+- **Fitted on:** 7,841 bouts through 2026-11-14 with a winner and no attribute gap; 307 trees, the count
+  the candidate's schedule chose. Elo parameters refitted on all bouts (K 56, finish multiplier 1.3).
+- **Calibration (rolling window):** Platt slope 1.302 on 1,928 bouts: 1,017 from 2023-01-14 to 2024-12-14
+  predicted by the model fitted through 2022, and 911 from 2025-01-11 to 2026-11-14 predicted by the model
+  fitted through 2024. 102 attribute-gap bouts are left out; with them the slope would be 1.256.
+- **Mismatch the calibration carries:** on the 6,930 bouts both were fitted on, the final booster's mean
+  absolute logit is 0.513 against the 2024 calibration model's 0.491, a ratio of 1.044 (the current refit:
+  1.042). Early stopping inside the final window would have chosen 663 trees and a ratio of 1.169; not used
+  (D47).
+- **Checks:** P(A) + P(B) is exactly 1 and swapping the fighters swaps the probabilities exactly on all 560
+  bouts from 2025-11-15 to 2026-11-14. Feature list (139 inputs), feature settings apart from the training
+  cut-off, and the feature table's columns and types are identical to the candidate's.
+- **Against the live model `xgboost-ffc3ca8c-ee729619`, on the 506 bouts of 2026:** correlation 0.994, mean
+  absolute difference 0.021 (median 0.017, 90th percentile 0.044, largest 0.090); the two pick different
+  winners in 16. The new model is a little less confident: its favourite averages 66.6% against 67.9%.
+  Both were fitted on these bouts, so their outcomes cannot say which is better, and no log loss is
+  reported.
+- **Against its own candidate, same bouts:** correlation 0.952, mean absolute difference 0.050, different
+  picks in 54; favourite 66.6% against 64.2%.
+
+**What changes for the site.** Little: on 2026 cards one bout in about 32 changes its pick, the average
+probability moves by about two points, and the average favourite is 1.3 points less confident. As with the current refit, the
+only out-of-sample evidence from here on is predictions published before events.
