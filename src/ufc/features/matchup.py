@@ -23,7 +23,12 @@ from typing import NamedTuple
 
 import numpy as np
 
-from ufc.features.fighter import FIGHTER_FEATURES, POS, fighter_vector
+from ufc.features.fighter import (
+    FIGHTER_FEATURES,
+    POS,
+    TIME_RATE_FEATURES,
+    fighter_vector,
+)
 from ufc.features.store import FeatureStore
 
 # Family keys in the order of docs/ML_REQUIREMENTS.md, "Feature families".
@@ -97,6 +102,13 @@ FLAG_NAMES: tuple[str, ...] = ("a_debut", "b_debut", "a_no_stats", "b_no_stats")
 ``no_stats``: no earlier bout with recorded stats (true for every debut)."""
 
 assert {f.family for f in FEATURES} == set(FAMILIES)
+
+SHRUNK_FEATURE_NAMES: tuple[str, ...] = (
+    *(f"d_{f.name}" for f in _DIFFED if f.name in TIME_RATE_FEATURES),
+    *(f"d_{p.name}" for p in PAIRS if {p.offense, p.defense} & TIME_RATE_FEATURES),
+)
+"""Features built on a rate over cage time. Rate shrinkage changes these and
+no others."""
 
 
 class Level(NamedTuple):

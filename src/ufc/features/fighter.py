@@ -22,7 +22,12 @@ from typing import NamedTuple
 
 import numpy as np
 
-from ufc.features.adjust import ADJUSTED_NAMES, adjusted_stats
+from ufc.features.adjust import (
+    ADJUSTED,
+    ADJUSTED_NAMES,
+    ADJUSTED_WINDOWS,
+    adjusted_stats,
+)
 from ufc.features.components import IDX
 from ufc.features.config import WINDOWS, weight_limit_lbs
 from ufc.features.shrink import RATE_COMPONENTS
@@ -144,6 +149,13 @@ FIGHTER_FEATURES: tuple[FighterFeature, ...] = (
     *(FighterFeature(name, "opponent_adjusted") for name in ADJUSTED_NAMES),
 )
 POS: dict[str, int] = {f.name: i for i, f in enumerate(FIGHTER_FEATURES)}
+
+TIME_RATE_FEATURES: frozenset[str] = frozenset(
+    {f"{r.name}_{w}" for w in WINDOWS for r in WINDOWED if r.den == "t"}
+    | {f"{s.name}_{w}" for w in ADJUSTED_WINDOWS for s in ADJUSTED if s.den == "t"}
+)
+"""Per-fighter values that are rates over cage time: the ones that change
+when ``FeatureConfig.shrink_minutes`` is set."""
 
 _N_WINDOWED = len(WINDOWS) * len(WINDOWED)
 _SL_WINDOWED = slice(0, _N_WINDOWED)

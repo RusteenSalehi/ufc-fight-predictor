@@ -27,6 +27,7 @@ from ufc.features.matchup import (
     FEATURES,
     FLAG_NAMES,
     LEVEL_NAMES,
+    SHRUNK_FEATURE_NAMES,
     flags_from,
     matchup_arrays,
 )
@@ -215,6 +216,7 @@ def build_meta(build: FeatureBuild, source_commit: str | None) -> dict:
             for family in FAMILIES
         },
         "level_features": list(LEVEL_NAMES),
+        "shrunk_features": list(SHRUNK_FEATURE_NAMES),
     }
     if build.elo_fit is not None:
         fit = build.elo_fit

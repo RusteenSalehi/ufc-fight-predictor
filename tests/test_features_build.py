@@ -127,6 +127,7 @@ def test_written_files_round_trip_and_rebuild_identically(data, built, tmp_path)
     assert meta["level_features"] == list(LEVEL_NAMES)
     assert not set(LEVEL_NAMES) & {f["name"] for f in meta["features"]}
     assert meta["config"]["shrink_minutes"] == 0.0
+    assert set(meta["shrunk_features"]) < set(FEATURE_NAMES)
     assert meta["config"]["train_end"] == data.bouts[150].date.isoformat()
     assert meta["elo_fit"]["last_date"] <= meta["config"]["train_end"]
     restored = FittedParams.from_dict(meta["params"])

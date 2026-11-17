@@ -12,7 +12,7 @@ from ufc.features.build import build_features, fit_params
 from ufc.features.components import IDX, N_COMPONENTS
 from ufc.features.config import FeatureConfig
 from ufc.features.fighter import WINDOWED
-from ufc.features.matchup import FEATURE_NAMES, build_matchup
+from ufc.features.matchup import FEATURE_NAMES, SHRUNK_FEATURE_NAMES, build_matchup
 from ufc.features.shrink import RATE_COMPONENTS, RatePriors, fit_rate_priors
 from ufc.features.store import FeatureStore, FittedParams
 
@@ -226,6 +226,7 @@ def test_zero_minutes_is_exactly_the_unshrunk_build_and_only_rates_change():
     pd.testing.assert_frame_equal(plain, without, check_exact=True)
 
     shrunk = build_features(data, replace(config, shrink_minutes=15.0), params).frame
+    # Written out independently of the pipeline's own list, then compared.
     per_minute = {r.name for r in WINDOWED if r.den == "t"}
     adjusted = {f"adj_{rate}" for rate in per_minute}
     # Style matchups built on a per-minute rate; control time is a share.
@@ -237,6 +238,7 @@ def test_zero_minutes_is_exactly_the_unshrunk_build_and_only_rates_change():
         or name in products
     ]
     assert len(affected) == 4 * 8 + 2 * 5 + 4
+    assert set(affected) == set(SHRUNK_FEATURE_NAMES)
     untouched = [name for name in plain.columns if name not in affected]
     pd.testing.assert_frame_equal(plain[untouched], shrunk[untouched], check_exact=True)
     # Shrinkage never creates or removes a missing value.
