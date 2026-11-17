@@ -50,7 +50,8 @@ Do not create `web/`, `infra/`, `predict/`, or `analyst/` until the roadmap reac
 ## Models
 
 - `uv run python -m ufc.models train` selects on validation and saves a candidate under `data/models/`. It also rewrites `data/features/` with the feature table it chose.
-- `uv run python -m ufc.models evaluate` is the only command that reads test-period rows. Each run is recorded in `data/models/test_evaluations.jsonl`. Do not run it to compare ideas; change something, select on validation, and evaluate a finalized candidate once.
+- `uv run python -m ufc.models evaluate` is the only command that scores a candidate on test-period rows. Each run is recorded in `data/models/test_evaluations.jsonl`. Do not run it to compare ideas; change something, select on validation, and evaluate a finalized candidate once.
+- `uv run python -m ufc.models.diagnostics` is analysis only (DECISIONS D45). It also reads test-period rows, records each run in `data/models/test_diagnostics.jsonl`, and writes `data/reports/diagnostics/`. Nothing it reports may be used to change a selection decision.
 - `uv run python -m ufc.models report` rewrites the generated block of `docs/MODEL_REPORT.md`. Numbers in that file's hand-written part must come from the block.
 - `data/models/approved.json` is edited by the user only. No code and no session writes it.
 

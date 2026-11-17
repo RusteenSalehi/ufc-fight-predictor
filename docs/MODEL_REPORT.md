@@ -5,7 +5,8 @@ period (2025-01-11 to 2026-11-14). It has **not** been approved: `data/models/ap
 and creating it is a manual step (`{"version": "xgboost-71fab189-44ddd3f0"}`).
 
 The block between the GENERATED markers is rebuilt from the metrics files by the last command below and is
-replaced on every run. Everything above it is written by hand and uses only numbers from that block.
+replaced on every run. Everything above it is written by hand and uses only numbers from that block. The
+"Era-shift diagnostic" section after the block is also written by hand, from the output of its own command.
 
     uv run python -m ufc.ingest fetch
     uv run python -m ufc.ingest load
@@ -31,7 +32,9 @@ regression shows the same improvement. I do not have a tested explanation. A lea
 years would look like this, and so would a real change in how bouts are matched. The checks that exist
 (the as-of tests, the attribute-gap exclusion below, the 2025 fold reproducing the registered model exactly)
 do not point to a leak, but the honest summary is: expect something between the backtest and the test
-figure, and treat the first live results as the real measurement.
+figure, and treat the first live results as the real measurement. The "Era-shift diagnostic" section at
+the end of this file tests this further: it finds no leak, and places the change at 2024, not at the start
+of the test period.
 
 **A leak was found and removed before the test period was opened.** In 895 training bouts one fighter's
 profile lacks a physical attribute that the other's has, and the fighter with the complete profile won
@@ -455,3 +458,181 @@ Written by the commands above, under `data/` (not committed):
 - `data/models/xgboost-71fab189-44ddd3f0/`: the model, calibrator, feature list, configuration, metrics and manifest
 
 <!-- END GENERATED -->
+
+## Era-shift diagnostic
+
+Written by hand on 2026-11-17 from `data/reports/diagnostics/era_shift.json`, which one command writes:
+
+    uv run python -m ufc.models.diagnostics
+
+Question: why do 2025 and 2026 score better than every earlier backtest year, and is it a leak? The command
+is analysis only. It does not select, save or change a model, and nothing below was used to change the
+candidate or any selection decision. It reads test-period bouts, so each run is recorded in
+`data/models/test_diagnostics.jsonl` (DECISIONS D45). Its "nothing removed" run repeats the saved
+walk-forward backtest exactly (largest difference in any fold's log loss: 0), so the numbers below sit on
+the same folds as the backtest table above. "Gap" means log loss pooled over 2013 to 2024 minus log loss
+pooled over 2025 to 2026: +0.0431 for the model.
+
+**Verdict: no leak found; the cause is not established.** Every check that could have exposed a leak came
+back clean. What the checks do show is that the better scores are a property of the bouts from 2024 onward,
+not of the model or of the test boundary: a model fitted through 2016 and never touched again shows the
+same drop, and so do one-line rules with no model at all. The checks cannot tell a real change in the sport
+from a defect in the source's recent rows that I have not thought of. Closing odds would (see "Not checked").
+
+### 1. Single-feature rules by year: no leak found; the shift is visible without any model
+
+Each feature as a rule ("pick the younger fighter"), scored over bouts where the two fighters differ on it.
+The direction of each rule was set on bouts through 2022 and held fixed. The twelve rules were listed in the
+script before any was scored.
+
+| pick the | 2013 to 2018 | 2019 to 2022 | 2023 | 2024 | 2025 | 2026 | 2013 to 2024 | 2025 to 2026 | bouts, 2025 to 2026 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| younger fighter | 56.7% | 57.3% | 58.9% | 59.1% | 60.5% | 61.3% | 57.3% | 60.9% | 999 |
+| taller fighter | 50.5% | 53.3% | 54.9% | 53.3% | 56.0% | 55.1% | 52.1% | 55.6% | 741 |
+| longer reach | 52.2% | 52.4% | 48.8% | 51.2% | 51.1% | 55.1% | 51.9% | 52.9% | 779 |
+| higher Elo | 57.1% | 55.8% | 55.4% | 55.8% | 56.9% | 55.9% | 56.4% | 56.4% | 982 |
+| more UFC fights | 52.2% | 50.2% | 46.6% | 43.8% | 44.5% | 43.8% | 50.2% | 44.2% | 921 |
+| higher career win rate | 55.7% | 56.2% | 57.7% | 62.7% | 60.0% | 59.7% | 56.7% | 59.9% | 745 |
+| longer win streak | 57.7% | 57.1% | 61.0% | 61.1% | 58.0% | 55.8% | 58.1% | 56.9% | 571 |
+| shorter loss streak | 51.5% | 54.1% | 58.4% | 57.4% | 61.9% | 59.5% | 53.7% | 60.7% | 516 |
+| shorter layoff | 50.8% | 51.6% | 49.6% | 52.8% | 53.6% | 53.1% | 51.2% | 53.3% | 780 |
+| more fights in the last 2 years | 54.3% | 54.6% | 54.2% | 50.0% | 54.7% | 46.8% | 54.0% | 50.8% | 773 |
+| stronger past opponents (mean Elo) | 51.8% | 50.2% | 50.0% | 51.3% | 49.4% | 47.7% | 51.0% | 48.6% | 815 |
+| non-debutant, when one is a debutant | 56.1% | 61.0% | 50.0% | 57.6% | 48.1% | 44.7% | 57.2% | 46.4% | 166 |
+
+The higher-rated fighter wins as often as ever (56.4% in both periods). The younger fighter, the fighter on
+the shorter losing streak and the fighter with the better win rate win more often than they used to, and the
+more experienced fighter now loses more often than not (44.2%, against 50.2%). These move from 2023 or
+2024, not from 2025. None of the rules that moved is a profile field except age, and a leak through one
+feature would not move several unrelated ones together. A yearly cell rests on a few hundred bouts (fewer
+for the debut rule), so single cells are within a few points of noise; the pattern across rows is the
+evidence, not any one cell.
+
+### 2. Matchup difficulty by year: not more lopsided by rating; more lopsided as the model sees them
+
+| bouts dated | bouts | median Elo gap | 90th percentile | Elo favourite, mean | mean age gap (years) | mean age | mean UFC fights | model favourite, mean | before calibration | given 70% or more | pick won | log loss the model expects | log loss |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2013 to 2018 | 2,732 | 48.1 | 122.7 | 58.0% | 4.16 | 30.2 | 5.4 | 59.5% | 59.6% | 11.1% | 59.0% | 0.6627 | 0.6685 |
+| 2019 to 2022 | 1,953 | 46.8 | 120.2 | 57.9% | 4.21 | 31.0 | 6.6 | 60.5% | 60.1% | 14.8% | 59.4% | 0.6568 | 0.6643 |
+| 2023 | 504 | 48.3 | 113.6 | 57.8% | 4.28 | 31.3 | 6.9 | 60.8% | 59.0% | 12.1% | 61.0% | 0.6578 | 0.6490 |
+| 2024 | 513 | 45.6 | 112.2 | 57.5% | 4.18 | 31.7 | 7.6 | 62.4% | 61.1% | 17.5% | 64.7% | 0.6477 | 0.6308 |
+| 2025 | 513 | 45.8 | 115.2 | 57.8% | 4.39 | 31.9 | 7.5 | 63.7% | 61.6% | 27.1% | 66.7% | 0.6345 | 0.6118 |
+| 2026 | 500 | 47.4 | 135.7 | 58.4% | 4.56 | 31.8 | 7.4 | 66.2% | 62.6% | 34.8% | 65.1% | 0.6101 | 0.6261 |
+| 2013 to 2024 | 5,702 | 47.9 | 120.6 | 57.9% | 4.19 | 30.7 | 6.1 | 60.2% | 59.9% | 13.1% | 59.9% | 0.6589 | 0.6619 |
+| 2025 to 2026 | 1,013 | 47.1 | 127.1 | 58.1% | 4.47 | 31.9 | 7.4 | 65.0% | 62.1% | 30.9% | 65.9% | 0.6225 | 0.6188 |
+
+"Log loss the model expects" is the mean entropy of its own probabilities: what it would score if it were
+exactly calibrated.
+
+By rating the cards have not changed: the median Elo gap is 47.9 before and 47.1 in the test period, and
+Elo's favourite averages 57.9% and 58.1%. So "recent cards are more lopsided" is false in the sense of
+rating mismatches. The model, though, is more confident on recent bouts (its favourite averages 65.0%
+against 60.2%; it gives 70% or more in 30.9% of bouts against 13.1%) and it is right about that: its picks
+won 65.9%, and the log loss it expected of itself (0.6225) is what it got (0.6188). Rosters are older and
+more experienced than they were (mean age 31.9 against 30.7, mean UFC fights 7.4 against 6.1) and age gaps
+are slightly wider, which is the kind of difference the model reads and Elo does not. Part of the rise in
+confidence is the calibrator, not the trees: the Platt slopes of the 2025 and 2026 folds are 1.216 and
+1.347, against 0.833 to 1.138 for the folds through 2022, and in 2026 the model was overconfident (expected
+0.6101, got 0.6261). As a leak test this is **inconclusive**: a model that expects to do well and does is
+what both a real signal and a leaked one look like.
+
+### 3. Attribution by removing inputs: no leak suspect
+
+The backtest rerun with inputs removed, one fit per fold (seed 0). "Change" is the rerun's log loss minus
+the full model's on the same bouts, with a 95% paired bootstrap interval.
+
+| removed | 2013 to 2024 | 2025 to 2026 | gap | change, 2013 to 2024 | 95% interval | change, 2025 to 2026 | 95% interval |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| nothing | 0.6619 | 0.6188 | +0.0431 | | | | |
+| physical family (6 features) | 0.6697 | 0.6378 | +0.0319 | +0.0078 | +0.0047 to +0.0107 | +0.0190 | +0.0080 to +0.0293 |
+| height | 0.6616 | 0.6185 | +0.0432 | -0.0003 | -0.0009 to +0.0003 | -0.0004 | -0.0022 to +0.0014 |
+| reach | 0.6619 | 0.6196 | +0.0423 | -0.0001 | -0.0010 to +0.0009 | +0.0007 | -0.0024 to +0.0038 |
+| stance (3 features) | 0.6619 | 0.6178 | +0.0442 | -0.0000 | -0.0008 to +0.0007 | -0.0011 | -0.0028 to +0.0005 |
+| date of birth (age difference and mean age) | 0.6690 | 0.6350 | +0.0339 | +0.0070 | +0.0042 to +0.0098 | +0.0162 | +0.0058 to +0.0261 |
+| every profile-sourced input (7) | 0.6698 | 0.6376 | +0.0322 | +0.0079 | +0.0048 to +0.0109 | +0.0188 | +0.0078 to +0.0285 |
+
+No removal shrinks the gap sharply. With every input that comes from a profile removed, the gap is +0.0322
+of the original +0.0431, and that model still goes from 0.6609 in 2023 to 0.6400 in 2024 and 0.6310 in
+2025. Height, reach and stance make no measurable difference in either period. Age is the one profile
+attribute that matters, and it is worth about twice as much in the test period (+0.0162 against +0.0070;
+the intervals overlap). I do not flag it as a leak suspect: a date of birth does not change after a bout,
+whether it is present is handled by the attribute-gap rule (D44), +0.0339 of the +0.0431 remains without
+it, and "pick the younger fighter" rises in check 1 with no model involved. It is the attribute to look at
+first if an older copy of the profiles becomes available. Removing each of the other twelve families in
+turn, and the level features, leaves a gap between +0.0403 (opponent-adjusted) and +0.0459 (striking): the gap does not live in any
+one family, which is what removing one overlapping family at a time would show either way.
+
+### 4. Profile capture: no leak found
+
+The database has no capture time for a profile. This check takes 22 Nov 2025 as upstream's last full
+refresh of existing profiles (the debut cut-off in `docs/DATA_QUALITY.md`, where the capture behaviour is a
+hypothesis, not a tested fact): a fighter who debuted before it has a profile from that refresh or earlier,
+and a later debutant was captured when first listed. On that reading, for a bout after the refresh between
+two fighters who debuted before it, both profiles were captured before the bout and cannot hold anything
+from after it. The conclusion below is only as good as that reading.
+
+| test-period bouts | bouts | model log loss | accuracy | without profile inputs | logistic regression | Elo |
+|---|---:|---:|---:|---:|---:|---:|
+| all | 1,013 | 0.6188 | 65.9% | 0.6376 | 0.6254 | 0.6789 |
+| bout before the refresh (profiles captured after the bout) | 475 | 0.6147 | 66.3% | 0.6319 | 0.6213 | 0.6722 |
+| bout after the refresh, both debuted before it (captured before the bout) | 358 | 0.5988 | 68.2% | 0.6214 | 0.6128 | 0.6813 |
+| bout after the refresh, either debuted after it (captured when first listed) | 180 | 0.6697 | 60.3% | 0.6852 | 0.6613 | 0.6917 |
+| the same, without attribute-gap bouts | 89 | 0.5931 | 69.7% | 0.6153 | 0.6047 | 0.6436 |
+| both debuted before 2024 | 448 | 0.5912 | 68.5% | 0.6199 | 0.6096 | 0.6702 |
+| either debuted in 2024 or later | 565 | 0.6407 | 63.8% | 0.6517 | 0.6380 | 0.6858 |
+| either debuted in 2024 or later, without attribute-gap bouts | 463 | 0.6174 | 66.5% | 0.6291 | 0.6221 | 0.6751 |
+
+If profiles captured after a bout were leaking its result, the 475 bouts before the refresh would score
+best. They do not: the 358 bouts whose profiles were captured beforehand score better (0.5988 against
+0.6147), with and without the profile inputs. The model is best where both fighters are established (0.5912
+for two fighters who debuted before 2024) and worst where a recent debutant has an incomplete profile, which
+is the attribute-gap group already reported above. In the test period the gap itself says nothing useful:
+the fighter with the complete profile won 44.1% of the 102 one-sided bouts, against 94.0% of 282 in 2013 to
+2018, and no model is fitted on such bouts in any case.
+
+### 5. Other recency-specific paths
+
+- **Feature build on the real data, later bouts deleted: no leak found.** Rebuilding the table with every
+  bout after 2024-12-31 deleted leaves all 152 columns of the 7,974 earlier bouts identical; the same with
+  a cutoff of 2025-11-21 (8,454 bouts). The existing perturbation test does this on synthetic data; this is
+  the real table. Profiles cannot be truncated this way, which is why checks 3 and 4 exist.
+- **Same card, real data: no leak found.** For six event dates spread from 2025-01-11 to 2026-11-14,
+  deleting the other 10 to 13 bouts held that day leaves the remaining bout's features identical.
+- **An old model on new bouts: the shift is in the bouts.** Each fold's model scored on every later year,
+  unchanged:
+
+  | fitted through | training bouts | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | 2013 | 1,837 | 0.6780 | 0.6645 | 0.6692 | 0.6701 | 0.6649 | 0.6520 | 0.6459 | 0.6576 |
+  | 2016 | 3,069 | 0.6850 | 0.6530 | 0.6741 | 0.6649 | 0.6619 | 0.6349 | 0.6182 | 0.6394 |
+  | 2019 | 4,466 | | | | 0.6533 | 0.6469 | 0.6315 | 0.6179 | 0.6360 |
+  | 2021 | 5,407 | | | | | | 0.6308 | 0.6170 | 0.6338 |
+  | 2022 (the registered model's schedule) | 5,913 | | | | | | | 0.6118 | 0.6316 |
+
+  A model fitted through 2016 scores 0.6182 on 2025, close to the 0.6118 of the model fitted through 2022.
+  More training data explains little of the gap; the step is at 2024, inside the validation period, and
+  every model sees it.
+- **How large the gap is against recent years.** The test period is better than 2013 to 2024 by +0.0431
+  (95% interval +0.0201 to +0.0644, each period resampled on its own), but better than 2023 to 2024 by
+  +0.0209 (-0.0079 to +0.0478) and than 2024 alone by +0.0119 (-0.0202 to +0.0442). Elo's difference from
+  2013 to 2024 is +0.0025 (-0.0111 to +0.0164). The test period is not distinguishable from 2024; what
+  needs explaining is 2024 onward against the years before.
+- **Fighter order in the source, Elo ties:** not a path. Inputs are differences and every probability is
+  the average of both orientations, which the symmetry test on all test-period bouts confirms exactly.
+
+### Not checked
+
+- **Closing odds.** If bookmakers' favourites also won more often from 2024, the change is in the sport;
+  if not, it is in this data. Historical odds are not sourced yet (baseline 3 in ML_REQUIREMENTS). This is
+  the check most likely to settle the question.
+- **Profile values as they stood at bout time.** Only capture timing was tested, through debut dates. The
+  upstream repository has history; comparing a commit of its profile file from before 2025 with the pinned
+  one would show whether heights, reaches, stances or dates of birth were edited afterwards.
+- **A change in how the source records recent bouts** (stat definitions, corrections applied only to recent
+  events). Nothing above would catch it.
+- **Why 2024.** Older, more experienced rosters and wider age gaps are described in check 2, not shown to be
+  the cause. No test here separates matchmaking from chance over three years.
+- **Seed noise in check 3.** Each rerun is one seed. Changes under about 0.002 should not be read at all;
+  the conclusions above rest on differences of 0.007 or more, or on their absence.
+- **Families that overlap.** Removing one at a time understates each. Fitting on one family alone, by era,
+  would say more about where the gap lives.
