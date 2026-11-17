@@ -223,6 +223,8 @@ __marimo__/
 # Data, models, and generated outputs
 data/
 models/
+# ...but the Python package that trains models is source code.
+!src/ufc/models/
 artifacts/
 *.db
 *.sqlite
