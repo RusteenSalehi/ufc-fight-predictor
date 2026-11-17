@@ -15,6 +15,12 @@ ingest) against the same profiles and overrides the load uses, plus
    corners resolving to one fighter): unresolved. The bout is stored and
    reported, not predicted.
 
+A provisional fighter whose article cites a UFCStats profile that is in the
+dataset is not a debutant: Wikipedia spells his name differently. The bout is
+unresolved, with the cited ID in the reason, until an override is added
+(``check_provisional``). The cited URL is parsed for its ID, never requested,
+and is evidence for a person to check, not a match.
+
 There is no fuzzy matching. A spelling that differs from the dataset's in
 more than accents and punctuation makes a provisional fighter, which the
 refresh report lists so that an override can be added.
@@ -43,6 +49,11 @@ from ufc.predict.cards import CardBout, CardFighter
 METHOD_PROVISIONAL = "provisional"
 METHOD_PLACEHOLDER = "placeholder"
 METHOD_CONFLICT = "names-disagree"
+METHOD_IN_DATASET = "article-cites-dataset-profile"
+
+_UFCSTATS_FIGHTER = re.compile(
+    r"ufcstats\.com/fighter-details/([0-9a-f]{16})", re.IGNORECASE
+)
 
 _DISAMBIGUATION = re.compile(r"\s*\([^()]*\)\s*$")
 
@@ -152,3 +163,38 @@ def resolve_bout(
     if not reasons and a.ref == b.ref:
         reasons.append(f"both names resolve to one fighter ({a.ref})")
     return BoutResolution(a, b, "; ".join(reasons) or None)
+
+
+def cited_profiles(wikitext: str) -> set[str]:
+    """UFCStats fighter IDs in URLs an article cites (parsed, never requested)."""
+    return {m.lower() for m in _UFCSTATS_FIGHTER.findall(wikitext)}
+
+
+def check_provisional(
+    resolution: BoutResolution,
+    bout: CardBout,
+    cited: dict[str, set[str]],
+    known: set[str],
+) -> BoutResolution:
+    """Unresolve a provisional fighter whose article cites a profile the
+    dataset has. ``cited`` maps article titles to the IDs they cite."""
+    sides = []
+    for fighter, r in ((bout.fighter_a, resolution.a), (bout.fighter_b, resolution.b)):
+        hits = (
+            sorted(cited.get(fighter.page or "", set()) & known)
+            if r.provisional
+            else []
+        )
+        if hits:
+            r = FighterResolution(
+                None,
+                METHOD_IN_DATASET,
+                detail=f"article {fighter.page!r} cites UFCStats profile "
+                f"{', '.join(hits)}, which the name rules do not match; add an override",
+            )
+        sides.append((fighter, r))
+    (_, a), (_, b) = sides
+    if a is resolution.a and b is resolution.b:
+        return resolution
+    reasons = [f"{f.name}: {r.method} ({r.detail})" for f, r in sides if r.ref is None]
+    return BoutResolution(a, b, "; ".join(reasons))

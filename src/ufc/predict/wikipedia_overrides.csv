@@ -1,1 +1,6 @@
 name,fight_id,fighter_id,note
+Bruno Gustavo da Silva,,294aa73dbf37d281,"Wikipedia's full name for the flyweight listed as Bruno Silva (one of two profiles with that name). His article cites this UFCStats profile, and its date of birth matches the profile's."
+Park Jun-yong,,285ae0b4a68221f4,"Korean name order; the dataset writes JunYong Park. His article (Jun Yong Park) cites this UFCStats profile, and its date of birth matches the profile's."
+Sharabutdin Magomedov,,06734ca9d88dec3a,"Full first name of the middleweight listed as Shara Magomedov. His article's date of birth matches the profile's; every bout of the profile is at middleweight, like the upcoming one."
+Yoo Joo-sang,,a44020ea2e8cd026,"Korean name order; the dataset writes JooSang Yoo, the only profile with this name in either order. Featherweight bouts in the dataset, featherweight upcoming."
+Matthieu Letho Duclos,,ec322adbabbfa6e7,"Wikipedia adds a middle name; the dataset's Matthieu Duclos is the only Duclos, a middleweight, and the upcoming bout is at middleweight."

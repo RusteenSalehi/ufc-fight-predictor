@@ -454,3 +454,22 @@ def test_predictions_are_symmetric(world, league):
         )
         assert ab[0][0] == ba[1][0] and ab[1][0] == ba[0][0]
         assert ab[0][0] + ab[1][0] == 1.0
+
+
+def test_a_debutant_whose_article_cites_a_dataset_profile_is_not_predicted(
+    world, league
+):
+    known = league.dataset.fighters[30].fighter_id
+    world["pages"].pages["Newcomer Person"] = INFOBOX.replace(
+        "Text.", f"<ref>http://ufcstats.com/fighter-details/{known}</ref>"
+    )
+    _, bouts = run(world)
+    f = world["names"]["f"]
+    row = next(b for b in bouts if b["name_b"] == "Newcomer Person")
+    assert row["fighter_b_ref"] is None and known in row["unresolved_reason"]
+    assert row["method_b"] == "article-cites-dataset-profile"
+    assert not query(
+        world, "SELECT * FROM predictions WHERE bout_id = ?", row["bout_id"]
+    )
+    event = published(world)["events"][0]
+    assert any(u["fighter_a"]["name"] == f[5] for u in event["unresolved_bouts"])

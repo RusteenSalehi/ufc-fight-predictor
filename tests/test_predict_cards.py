@@ -11,8 +11,12 @@ from ufc.predict.cards import CardBout, CardFighter, ListedEvent
 from ufc.predict.resolve import (
     METHOD_AMBIGUOUS,
     METHOD_CONFLICT,
+    METHOD_IN_DATASET,
     METHOD_PLACEHOLDER,
     METHOD_PROVISIONAL,
+    check_provisional,
+    cited_profiles,
+    load_wikipedia_overrides,
     resolve_bout,
     resolve_fighter,
 )
@@ -274,3 +278,31 @@ def test_events_retire_when_their_date_passes_or_they_leave_the_list(conn):
         conn.execute("SELECT event_key, status FROM upcoming_events").fetchall()
     )
     assert status[EVENT] == "past"
+
+
+def test_an_article_citing_a_dataset_profile_unresolves_a_provisional_fighter():
+    b = bout(fighter("Alan Able"), fighter("Al Long-Name", "Al Long-Name"))
+    resolution = resolve_bout(RESOLVER, b, "wb")
+    assert resolution.resolved and resolution.b.provisional
+    text = "{{Infobox martial artist|reach = 70 in<ref>[http://ufcstats.com/fighter-details/AAAAAAAAAAAAAAAA x]</ref>}}"
+    assert cited_profiles(text) == {"a" * 16}
+    checked = check_provisional(
+        resolution, b, {"Al Long-Name": cited_profiles(text)}, {"a" * 16}
+    )
+    assert not checked.resolved and checked.b.method == METHOD_IN_DATASET
+    assert (
+        "a" * 16 in checked.unresolved_reason
+        and "override" in checked.unresolved_reason
+    )
+    # An ID the dataset does not have, or no citation, leaves him provisional.
+    assert (
+        check_provisional(resolution, b, {"Al Long-Name": {"9" * 16}}, {"a" * 16})
+        is resolution
+    )
+    assert check_provisional(resolution, b, {}, {"a" * 16}) is resolution
+
+
+def test_shipped_wikipedia_overrides_load_and_name_dataset_ids():
+    overrides = load_wikipedia_overrides()
+    assert overrides and all(len(o.fighter_id) == 16 and o.note for o in overrides)
+    assert all(o.fight_id is None for o in overrides)

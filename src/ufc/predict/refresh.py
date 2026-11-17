@@ -5,7 +5,9 @@ Order and failure handling (D50):
 
 1. Read "List of UFC events". If it cannot be fetched or parsed, stop:
    nothing in the database changes and nothing is published.
-2. Read every scheduled event page in one request. Each event's card is
+2. Read every scheduled event page in one request, parse each card and
+   resolve its fighters. Check provisional fighters' articles (one request);
+   if that fails, stop before any card is applied. Then each event's card is
    applied, or, if its page is missing, unreadable or implausible, left
    exactly as it was, with the failure logged.
 3. Check staleness against completed events after the dataset's last one.
@@ -45,9 +47,14 @@ from ufc.predict.cards_db import (
     upsert_event,
 )
 from ufc.predict.predict import PredictionSummary, feature_store, predict_upcoming
-from ufc.predict.resolve import resolve_bout
+from ufc.predict.resolve import check_provisional, cited_profiles, resolve_bout
 from ufc.predict.staleness import Staleness, check_staleness, dataset_last_event
-from ufc.predict.wikipedia import CARD_MAX_AGE_S, Wikipedia, WikipediaError
+from ufc.predict.wikipedia import (
+    CARD_MAX_AGE_S,
+    PROFILE_MAX_AGE_S,
+    Wikipedia,
+    WikipediaError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,12 +125,20 @@ def refresh(
         result.requests = client.requests_made
         return result
 
+    # Parse every card first; nothing is written until the checks are done.
     listed_keys: set[str] = set()
+    parsed: list[tuple[str, int, list]] = []
     for listed in events.scheduled:
         page = pages.get(listed.page)
         with conn:
             if page is None or not page.exists or page.pageid is None:
                 result.event_errors[listed.page] = "event page not found"
+                log(
+                    conn,
+                    now,
+                    "error",
+                    f"{listed.page!r}: event page not found; card unchanged",
+                )
                 # Still listed: keep the stored event as it is.
                 listed_keys.update(
                     r["event_key"]
@@ -131,12 +146,6 @@ def refresh(
                         "SELECT event_key FROM upcoming_events WHERE page_title = ?",
                         (listed.page,),
                     )
-                )
-                log(
-                    conn,
-                    now,
-                    "error",
-                    f"{listed.page!r}: event page not found; card unchanged",
                 )
                 continue
             key = upsert_event(conn, listed, page, now, today)
@@ -149,20 +158,55 @@ def refresh(
                 result.event_errors[listed.page] = str(exc)
                 log(conn, now, "error", f"card not read ({exc}); card unchanged", key)
                 continue
-            bouts = [
-                (
-                    b,
-                    resolve_bout(
-                        resolver, b, bout_id(page.pageid, b.fighter_a, b.fighter_b)
-                    ),
-                )
-                for b in card.bouts
-                if not b.completed
-            ]
-            change = apply_card(conn, key, page.pageid, bouts, now)
-            result.changes.append(change)
-            if not change.applied:
-                result.event_errors[listed.page] = change.reason or "card not applied"
+        bouts = [
+            (
+                b,
+                resolve_bout(
+                    resolver, b, bout_id(page.pageid, b.fighter_a, b.fighter_b)
+                ),
+            )
+            for b in card.bouts
+            if not b.completed
+        ]
+        parsed.append((key, page.pageid, bouts))
+
+    # A provisional fighter whose article cites a profile in the dataset is
+    # not a debutant (resolve.check_provisional). One request for all of them.
+    articles = sorted(
+        {
+            fighter.page
+            for _, _, bouts in parsed
+            for b, r in bouts
+            for fighter, side in ((b.fighter_a, r.a), (b.fighter_b, r.b))
+            if side.provisional and fighter.page
+        }
+    )
+    try:
+        fetched = client.pages(articles, PROFILE_MAX_AGE_S) if articles else {}
+    except WikipediaError as exc:
+        result.stopped = f"could not check provisional fighters' articles: {exc}"
+        with conn:
+            log(
+                conn,
+                now,
+                "error",
+                f"refresh stopped, no card applied: {result.stopped}",
+            )
+        result.requests = client.requests_made
+        return result
+    cited = {t: cited_profiles(p.wikitext or "") for t, p in fetched.items()}
+    known = {r[0] for r in conn.execute("SELECT fighter_id FROM fighters")}
+
+    for key, pageid, bouts in parsed:
+        checked = [(b, check_provisional(r, b, cited, known)) for b, r in bouts]
+        with conn:
+            change = apply_card(conn, key, pageid, checked, now)
+        result.changes.append(change)
+        if not change.applied:
+            page_title = conn.execute(
+                "SELECT page_title FROM upcoming_events WHERE event_key = ?", (key,)
+            ).fetchone()[0]
+            result.event_errors[page_title] = change.reason or "card not applied"
     with conn:
         retire_events(conn, listed_keys, today, now)
 
