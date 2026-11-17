@@ -1,6 +1,0 @@
-{
-  "repo": "Greco1899/scrape_ufc_stats",
-  "commit": "96adace863c0a793579cc06d27d468797545607f",
-  "commit_date": "2026-11-15T18:03:06Z",
-  "subset": "test fixture cut by scripts/make_ingest_fixtures.py"
-}

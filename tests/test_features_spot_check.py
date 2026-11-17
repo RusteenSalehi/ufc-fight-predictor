@@ -1,11 +1,13 @@
 """Spot check: Khabib Nurmagomedov's stats before UFC 160, worked by hand.
 
-The fixture in tests/fixtures/greco_spot_check holds the published rows for
-his first four UFC bouts, unchanged. The test runs them through ingestion,
-SQLite and the feature pipeline, and compares his as-of values before the
-fourth bout (2013-05-25, against Abel Trujillo) with arithmetic done here
-from the three earlier bouts. Every number below can be read off
-``ufc_fight_stats.csv`` and ``ufc_fight_results.csv`` in that directory.
+No real rows are committed (DECISIONS D15). At test time the module reads the
+published rows for his first four UFC bouts from the downloaded snapshot in
+data/external/greco/ (``uv run python -m ufc.ingest fetch``), runs them
+through ingestion, SQLite and the feature pipeline, and compares his as-of
+values before the fourth bout (2013-05-25, against Abel Trujillo) with
+arithmetic done here from the three earlier bouts. Every number below can be
+read off ``ufc_fight_stats.csv`` and ``ufc_fight_results.csv`` in the
+snapshot. The module is skipped, with the reason, when the snapshot is absent.
 
     bout                         time       sig. strikes   takedowns  KD  sub  control
     2012-01-20 Shalorus  sub R3  2:08   K   35 of  77      3 of  9    1   1    359 s
@@ -21,6 +23,7 @@ here; tests/test_features_adjust.py covers that arithmetic.
 """
 
 import math
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -32,11 +35,58 @@ from ufc.db.connection import connect
 from ufc.features.build import build_features
 from ufc.features.data import load_feature_data
 from ufc.features.matchup import build_matchup
+from ufc.ingest import parsing as p
+from ufc.ingest import source
 from ufc.ingest.identity import load_overrides
-from ufc.ingest.source import load_raw_tables
+from ufc.ingest.source import RawTables, load_raw_tables
 from ufc.ingest.transform import build_dataset
 
-FIXTURE_DIR = Path(__file__).parent / "fixtures" / "greco_spot_check"
+SNAPSHOT_DIR = Path(__file__).parents[1] / "data" / "external" / "greco"
+# His first four UFC bouts; the fourth is the one whose features are checked.
+SPOT_CHECK_FIGHT_IDS = {
+    "8360accf6f70ebc4",  # 2012-01-20, submission win in round 3
+    "ded18af0e4eae2f7",  # 2012-07-07, unanimous decision win
+    "7651b2e09ea2c420",  # 2013-01-19, KO/TKO win in round 1
+    "e1d33aa47b35d021",  # 2013-05-25
+}
+
+if not (SNAPSHOT_DIR / source.EVENTS_FILE).exists():
+    pytest.skip(
+        f"no dataset snapshot at {SNAPSHOT_DIR}; run `uv run python -m ufc.ingest "
+        "fetch` to download it (the real rows are deliberately not committed)",
+        allow_module_level=True,
+    )
+
+
+def cut_snapshot(raw: RawTables, fight_ids: set[str]) -> RawTables:
+    """The rows for ``fight_ids`` and for everyone named in them."""
+
+    def fight(row: dict[str, str]) -> bool:
+        return p.id_from_url(row["URL"], "fight") in fight_ids
+
+    results = [r for r in raw.fight_results if fight(r)]
+    keys = {(p.clean(r["EVENT"]), p.clean(r["BOUT"])) for r in results}
+    names = {p.name_key(n) for r in results for n in p.split_bout(r["BOUT"])}
+    events = {p.clean(r["EVENT"]) for r in results}
+    return replace(
+        raw,
+        events=[r for r in raw.events if p.clean(r["EVENT"]) in events],
+        fight_details=[r for r in raw.fight_details if fight(r)],
+        fight_results=results,
+        fight_stats=[
+            r
+            for r in raw.fight_stats
+            if (p.clean(r["EVENT"]), p.clean(r["BOUT"])) in keys
+        ],
+        fighter_details=[
+            r
+            for r in raw.fighter_details
+            if p.name_key(f"{r['FIRST']} {r['LAST']}") in names
+        ],
+        fighter_tott=[r for r in raw.fighter_tott if p.name_key(r["FIGHTER"]) in names],
+    )
+
+
 KHABIB = "032cc3922d871c7f"
 TRUJILLO = "e14b5aa06eea9653"
 UFC_160_BOUT = "e1d33aa47b35d021"
@@ -48,7 +98,8 @@ MINUTES = SECONDS / 60  # 29.05
 
 @pytest.fixture(scope="module")
 def built():
-    dataset = build_dataset(load_raw_tables(FIXTURE_DIR), load_overrides())
+    raw = cut_snapshot(load_raw_tables(SNAPSHOT_DIR), SPOT_CHECK_FIGHT_IDS)
+    dataset = build_dataset(raw, load_overrides())
     assert dataset.count_issues("error") == 0
     conn = connect(":memory:")
     loaders.load_dataset(conn, dataset, seen_at=SEEN_AT)

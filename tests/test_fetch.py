@@ -5,6 +5,7 @@ import json
 import pytest
 import requests
 
+from tests.conftest import OVERRIDES_FILE
 from ufc.ingest import fetch, source
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
@@ -90,7 +91,7 @@ def test_fetched_snapshot_loads(fixture_dir, tmp_path):
 
     dest = tmp_path / "greco"
     run(FakeSession(fixture_dir), dest)
-    prepared = pipeline.prepare(dest)
+    prepared = pipeline.prepare(dest, overrides_path=OVERRIDES_FILE)
     assert prepared.commit == COMMIT
     assert len(prepared.dataset.bouts) == 27
 

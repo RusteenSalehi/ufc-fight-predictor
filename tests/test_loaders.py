@@ -11,8 +11,8 @@ from ufc.db.connection import connect
 from ufc.ingest.models import STAT_COLUMNS, Dataset
 
 LATER = "2026-11-22T18:00:00Z"
-TITLE_FIGHT = "30dbf1eceb2e1f8d"
-GANE = "787bb1f087ccff8a"
+TITLE_FIGHT = "b000000000000001"
+VALCOURT = "f100000000000001"
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ def test_rows_round_trip(conn, dataset):
     ).fetchone()
     assert bout["weight_class"] == "Heavyweight"
     assert (bout["is_title_bout"], bout["is_womens"], bout["has_stats"]) == (1, 0, 1)
-    assert (bout["result"], bout["winner_id"]) == ("win", GANE)
+    assert (bout["result"], bout["winner_id"]) == ("win", VALCOURT)
     assert (bout["end_round"], bout["end_time_s"], bout["fight_time_s"]) == (
         5,
         300,
@@ -93,26 +93,29 @@ def test_rows_round_trip(conn, dataset):
     event = conn.execute(
         "SELECT * FROM events WHERE event_id = ?", (bout["event_id"],)
     ).fetchone()
-    assert (event["name"], event["date"]) == ("UFC 334: Gane vs. Hokit", "2026-11-14")
+    assert (event["name"], event["date"]) == (
+        "UFC 900: Valcourt vs. Hollin",
+        "2026-11-14",
+    )
 
     fighter = conn.execute(
-        "SELECT * FROM fighters WHERE fighter_id = ?", (GANE,)
+        "SELECT * FROM fighters WHERE fighter_id = ?", (VALCOURT,)
     ).fetchone()
     assert (fighter["height_cm"], fighter["reach_cm"], fighter["dob"]) == (
         193.04,
         205.74,
-        "1990-04-12",
+        "1991-02-03",
     )
 
     totals = conn.execute(
         "SELECT * FROM bout_fighter_stats WHERE bout_id = ? AND fighter_id = ?",
-        (TITLE_FIGHT, GANE),
+        (TITLE_FIGHT, VALCOURT),
     ).fetchone()
     assert (
         totals["sig_str_landed"],
         totals["sig_str_attempted"],
         totals["ctrl_s"],
-    ) == (237, 343, 4)
+    ) == (170, 291, 4)
 
 
 def test_stored_totals_equal_the_sum_of_stored_rounds(conn, dataset):
@@ -131,15 +134,15 @@ def test_stored_totals_equal_the_sum_of_stored_rounds(conn, dataset):
 def test_missing_values_are_null_not_zero(conn, dataset):
     load(conn, dataset)
     no_ctrl = conn.execute(
-        "SELECT ctrl_s FROM bout_fighter_stats WHERE bout_id = '4acab67848e78327'"
+        "SELECT ctrl_s FROM bout_fighter_stats WHERE bout_id = 'b00000000000001d'"
     ).fetchall()
     assert [row[0] for row in no_ctrl] == [None, None]
     no_stats = conn.execute(
-        "SELECT count(*) FROM bout_fighter_stats WHERE bout_id = 'a1db4c917777aa79'"
+        "SELECT count(*) FROM bout_fighter_stats WHERE bout_id = 'b00000000000001b'"
     ).fetchone()[0]
     assert no_stats == 0
     reach = conn.execute(
-        "SELECT reach_cm, dob FROM fighters WHERE fighter_id = '598a58db87b890ee'"
+        "SELECT reach_cm, dob FROM fighters WHERE fighter_id = 'f100000000000025'"
     ).fetchone()
     assert tuple(reach) == (None, None)
 
@@ -194,7 +197,7 @@ def test_loading_an_older_snapshot_afterwards_does_not_move_last_seen_back(
 def test_changed_values_are_updated_in_place(conn, dataset):
     load(conn, dataset)
     fighters = [
-        replace(f, reach_cm=200.0) if f.fighter_id == GANE else f
+        replace(f, reach_cm=200.0) if f.fighter_id == VALCOURT else f
         for f in dataset.fighters
     ]
     bouts = [
@@ -204,7 +207,7 @@ def test_changed_values_are_updated_in_place(conn, dataset):
     load(conn, replace_dataset(dataset, fighters=fighters, bouts=bouts))
     assert (
         conn.execute(
-            "SELECT reach_cm FROM fighters WHERE fighter_id = ?", (GANE,)
+            "SELECT reach_cm FROM fighters WHERE fighter_id = ?", (VALCOURT,)
         ).fetchone()[0]
         == 200.0
     )
@@ -290,10 +293,10 @@ def test_schema_rejects_inconsistent_results(conn, dataset):
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute(
             "UPDATE bouts SET winner_id = ? WHERE bout_id = ?",
-            ("9b5b5a75523728f3", TITLE_FIGHT),
+            ("f100000000000023", TITLE_FIGHT),
         )
     with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("DELETE FROM fighters WHERE fighter_id = ?", (GANE,))
+        conn.execute("DELETE FROM fighters WHERE fighter_id = ?", (VALCOURT,))
 
 
 def test_bouts_missing_from_a_later_snapshot_are_reported_and_kept(conn, dataset):

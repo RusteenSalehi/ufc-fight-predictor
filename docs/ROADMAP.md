@@ -31,7 +31,7 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - `uv run python -m ufc.ingest load`: parses, joins, validates and loads them into `data/ufc.db`. A validation gate stops a bad snapshot from overwriting good data. Loads are idempotent.
 - `src/ufc/db/schema.sql` and upsert loaders keyed on UFCStats IDs. Per-round stats are stored and per-fight totals derived.
 - Fighter names on bouts are resolved to fighter IDs by exact rules and an explicit override file (D17).
-- Tests run against a small real-data fixture (`tests/fixtures/greco/`) covering draws, no contests, DQs, missing attributes, early events without stats, split decisions, title bouts, women's bouts, and the dataset's own defects.
+- Tests run against a small synthetic fixture (`tests/fixtures/greco/`, written by `scripts/make_synthetic_fixtures.py`, no real rows) covering draws, no contests, DQs, missing attributes, early events without stats, split decisions, title bouts, women's bouts, and the dataset's own defects.
 - Saved Wikipedia API responses (`tests/fixtures/wikipedia/`) confirming that upcoming cards can be parsed in M5.
 
 ## M3 (Fable 5.2, high effort): done
@@ -39,7 +39,7 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - `uv run python -m ufc.features build`: fits Elo parameters and league baselines on bouts through 2022-12-31, builds one row per completed bout, and writes `data/features/features.parquet` and `features_meta.json`. Rerunning replaces both with identical content.
 - `uv run python -m ufc.features summary`: lists every feature by family with its missing-value counts.
 - `src/ufc/features/`: as-of store, Elo, per-fighter features for families 1 to 12 (style archetypes excluded), opponent adjustment, matchup assembly. `build_matchup` gives the same features for a hypothetical bout from two fighter IDs and a date.
-- Tests: perturbation, same-event, symmetry, and a hand-calculated spot check on four real bouts (`tests/fixtures/greco_spot_check/`). Design choices are in DECISIONS D23 to D29.
+- Tests: perturbation, same-event, symmetry, and a hand-calculated spot check on four real bouts (read from `data/external/greco/` at test time; skipped if absent). Design choices are in DECISIONS D23 to D29.
 
 ## M2 prompt (Sonnet 5.5, medium effort)
 

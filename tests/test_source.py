@@ -18,7 +18,7 @@ def test_load_raw_tables_reads_every_file_as_strings(raw):
     assert len(raw.events) == 19
     assert len(raw.fight_results) == 35
     assert len(raw.fight_stats) == 144
-    assert raw.events[0]["EVENT"] == "UFC 334: Gane vs. Hokit"
+    assert raw.events[0]["EVENT"] == "UFC 900: Valcourt vs. Hollin"
     assert all(
         isinstance(value, str) for row in raw.fight_stats for value in row.values()
     )

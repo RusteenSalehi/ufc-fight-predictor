@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from tests.conftest import SNAPSHOT_AT
+from tests.conftest import OVERRIDES_FILE, SNAPSHOT_AT
 from ufc.db import loaders
 from ufc.ingest import pipeline, source
 from ufc.ingest.__main__ import format_report, main
@@ -28,7 +28,9 @@ def dump(path) -> dict[str, list[tuple]]:
 
 def test_run_load_writes_the_database(fixture_dir, tmp_path):
     db_path = tmp_path / "ufc.db"
-    result = pipeline.run_load(fixture_dir, db_path, max_dropped_pct=LOOSE)
+    result = pipeline.run_load(
+        fixture_dir, db_path, max_dropped_pct=LOOSE, overrides_path=OVERRIDES_FILE
+    )
     assert result.table_counts == {
         "events": 19,
         "fighters": 55,
@@ -44,21 +46,27 @@ def test_run_load_writes_the_database(fixture_dir, tmp_path):
 
 def test_running_the_whole_load_twice_gives_identical_tables(fixture_dir, tmp_path):
     db_path = tmp_path / "ufc.db"
-    pipeline.run_load(fixture_dir, db_path, max_dropped_pct=LOOSE)
+    pipeline.run_load(
+        fixture_dir, db_path, max_dropped_pct=LOOSE, overrides_path=OVERRIDES_FILE
+    )
     first = dump(db_path)
-    pipeline.run_load(fixture_dir, db_path, max_dropped_pct=LOOSE)
+    pipeline.run_load(
+        fixture_dir, db_path, max_dropped_pct=LOOSE, overrides_path=OVERRIDES_FILE
+    )
     assert dump(db_path) == first
 
 
 def test_snapshot_provenance_is_recorded(fixture_dir, tmp_path):
     db_path = tmp_path / "ufc.db"
-    pipeline.run_load(fixture_dir, db_path, max_dropped_pct=LOOSE)
+    pipeline.run_load(
+        fixture_dir, db_path, max_dropped_pct=LOOSE, overrides_path=OVERRIDES_FILE
+    )
     rows = dump(db_path)["source_files"]
     assert {row[0] for row in rows} == set(source.EXPECTED_COLUMNS)
     assert {row[3:] for row in rows} == {
         (
             "Greco1899/scrape_ufc_stats",
-            "96adace863c0a793579cc06d27d468797545607f",
+            "0123456789abcdef0123456789abcdef01234567",
             SNAPSHOT_AT,
         )
     }
@@ -67,7 +75,11 @@ def test_snapshot_provenance_is_recorded(fixture_dir, tmp_path):
 def test_dry_run_writes_nothing(fixture_dir, tmp_path):
     db_path = tmp_path / "ufc.db"
     result = pipeline.run_load(
-        fixture_dir, db_path, dry_run=True, max_dropped_pct=LOOSE
+        fixture_dir,
+        db_path,
+        dry_run=True,
+        max_dropped_pct=LOOSE,
+        overrides_path=OVERRIDES_FILE,
     )
     assert result.table_counts is None
     assert len(result.prepared.dataset.bouts) == 27
@@ -77,13 +89,15 @@ def test_dry_run_writes_nothing(fixture_dir, tmp_path):
 def test_gate_refuses_to_load_when_too_many_fights_are_dropped(fixture_dir, tmp_path):
     db_path = tmp_path / "ufc.db"
     with pytest.raises(pipeline.ValidationFailed, match="2 of 29 fights"):
-        pipeline.run_load(fixture_dir, db_path)
+        pipeline.run_load(fixture_dir, db_path, overrides_path=OVERRIDES_FILE)
     assert not db_path.exists()
 
 
 def test_failed_gate_leaves_the_last_good_load_untouched(fixture_dir, tmp_path):
     db_path = tmp_path / "ufc.db"
-    pipeline.run_load(fixture_dir, db_path, max_dropped_pct=LOOSE)
+    pipeline.run_load(
+        fixture_dir, db_path, max_dropped_pct=LOOSE, overrides_path=OVERRIDES_FILE
+    )
     good = dump(db_path)
 
     broken = tmp_path / "broken"
@@ -91,7 +105,9 @@ def test_failed_gate_leaves_the_last_good_load_untouched(fixture_dir, tmp_path):
     results = broken / source.FIGHT_RESULTS_FILE
     results.write_text(results.read_text("utf-8").replace(",W/L,", ",WIN,"), "utf-8")
     with pytest.raises(pipeline.ValidationFailed):
-        pipeline.run_load(broken, db_path, max_dropped_pct=LOOSE)
+        pipeline.run_load(
+            broken, db_path, max_dropped_pct=LOOSE, overrides_path=OVERRIDES_FILE
+        )
     assert dump(db_path) == good
 
 
@@ -112,8 +128,10 @@ def test_snapshot_without_provenance_needs_an_explicit_as_of(fixture_dir, tmp_pa
     shutil.copytree(fixture_dir, bare)
     (bare / source.SOURCE_INFO_FILE).unlink()
     with pytest.raises(source.SourceError, match="--as-of"):
-        pipeline.prepare(bare)
-    prepared = pipeline.prepare(bare, as_of="2026-11-15T13:03:06-05:00")
+        pipeline.prepare(bare, overrides_path=OVERRIDES_FILE)
+    prepared = pipeline.prepare(
+        bare, overrides_path=OVERRIDES_FILE, as_of="2026-11-15T13:03:06-05:00"
+    )
     assert prepared.snapshot_at == SNAPSHOT_AT
     assert prepared.commit == "unknown"
 
@@ -148,15 +166,17 @@ def test_cli_load_prints_report_and_row_counts(fixture_dir, tmp_path, capsys):
             str(fixture_dir),
             "--db",
             str(db_path),
+            "--overrides",
+            str(OVERRIDES_FILE),
             "--max-dropped-pct",
             "10",
         ]
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert "Greco1899/scrape_ufc_stats@96adace863c0a793579cc06d27d468797545607f" in out
+    assert "Greco1899/scrape_ufc_stats@0123456789abcdef0123456789abcdef01234567" in out
     assert "Validation: 2 errors, 6 warnings, 17 notes" in out
-    assert "ERROR   orphan_event [bout abf5f4d6f777cf7b]" in out
+    assert "ERROR   orphan_event [bout b000000000000013]" in out
     assert "7 fighter names were resolved by override or weight class" in out
     assert "bouts                     27" in out
     assert db_path.exists()
@@ -171,6 +191,8 @@ def test_cli_dry_run(fixture_dir, tmp_path, capsys):
             str(fixture_dir),
             "--db",
             str(db_path),
+            "--overrides",
+            str(OVERRIDES_FILE),
             "--max-dropped-pct",
             "10",
             "--dry-run",
@@ -183,7 +205,17 @@ def test_cli_dry_run(fixture_dir, tmp_path, capsys):
 
 def test_cli_reports_a_failed_gate_with_exit_code_2(fixture_dir, tmp_path, capsys):
     db_path = tmp_path / "ufc.db"
-    code = main(["load", "--source", str(fixture_dir), "--db", str(db_path)])
+    code = main(
+        [
+            "load",
+            "--source",
+            str(fixture_dir),
+            "--db",
+            str(db_path),
+            "--overrides",
+            str(OVERRIDES_FILE),
+        ]
+    )
     assert code == 2
     assert "database not changed" in capsys.readouterr().err
     assert not db_path.exists()

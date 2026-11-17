@@ -203,7 +203,7 @@ def parse_outcome(text: str) -> tuple[str, str | None]:
 
 
 def split_bout(text: str) -> tuple[str, str]:
-    """``"Ciryl Gane vs. Josh Hokit"`` -> ``("Ciryl Gane", "Josh Hokit")``."""
+    """``"Orin Valcourt vs. Dax Hollin"`` -> ``("Orin Valcourt", "Dax Hollin")``."""
     parts = [clean(part) for part in clean(text).split(" vs. ")]
     if len(parts) != 2 or not all(parts):
         raise ParseError(f"cannot split bout into two fighters: {text!r}")

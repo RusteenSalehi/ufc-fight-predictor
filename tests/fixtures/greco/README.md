@@ -1,22 +1,31 @@
-# Dataset fixtures
+# Synthetic dataset fixtures
 
-A 29-fight subset of the CSV files published at
-https://github.com/Greco1899/scrape_ufc_stats, cut from commit
-`96adace863c0a793579cc06d27d468797545607f` (2026-11-15). Rows are copied
-unchanged; only the selection is ours.
+These six CSVs follow the column layout of the files published at
+https://github.com/Greco1899/scrape_ufc_stats, but **no row in them comes from
+that dataset or from ufcstats.com**. Fighters, events, referees, judges' scores
+and statistics are invented (statistics from a seeded random generator, except a
+few rounds written by hand so tests can state exact values). The IDs are
+readable on purpose: `e0..` events, `f1..` fighters, `b0..` fights.
 
-Regenerate with:
+`SOURCE.json` carries a made-up commit hash. `identity_overrides.csv` is this
+fixture's own override file; tests pass it explicitly, because the file shipped
+in `src/ufc/ingest/` is keyed to the real snapshot.
 
-    uv run python -m ufc.ingest fetch --ref 96adace863c0a793579cc06d27d468797545607f
-    uv run python scripts/make_ingest_fixtures.py
+Regenerate (the output is deterministic):
 
-The fights were chosen to cover the edge cases ingestion has to handle. The
-list, with the reason for each, is in `scripts/make_ingest_fixtures.py`.
+    uv run python scripts/make_synthetic_fixtures.py
 
-## Licence and origin
+The fights mirror the edge cases ingestion has to handle: draws, no contests,
+a disqualification, a doctor's stoppage, tournament finals, a superfight with
+overtime, catch-weight and women's bouts (one women's bout not labelled as
+such), early events without stats or control time, fights listed twice under a
+renamed event, a fight whose event is missing, the same pairing twice on one
+card, fighters sharing a name (settled by weight class, by override, or not at
+all), misspelled and shortened names, profiles missing height, reach, stance or
+date of birth, a profile whose stored attributes belong to a different name,
+and names that differ between the two fighter files. Each fight's key in
+`scripts/make_synthetic_fixtures.py` names its case.
 
-The upstream repository is licensed GPL-3.0. Its data was collected from
-ufcstats.com, whose operator has not granted permission for reuse. These
-excerpts are kept here only so the tests can run against real rows. The rest
-of this repository does not contain the dataset; it is downloaded at run time
-into the git-ignored `data/` directory.
+The one test that needs real rows, the hand-calculated spot check
+(`tests/test_features_spot_check.py`), reads them from the downloaded snapshot
+in `data/external/greco/` and is skipped when that is absent.

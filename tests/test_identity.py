@@ -2,6 +2,7 @@
 
 import pytest
 
+from tests.conftest import OVERRIDES_FILE as FIXTURE_OVERRIDES
 from ufc.ingest import identity
 from ufc.ingest.identity import FighterResolver, Override, Profile, weight_fits
 
@@ -123,8 +124,10 @@ def test_weight_fits(weight, weight_class, expected):
     assert weight_fits(weight, weight_class) is expected
 
 
-def test_shipped_overrides_load_and_carry_a_reason():
-    overrides = identity.load_overrides()
+@pytest.mark.parametrize("path", [None, FIXTURE_OVERRIDES])
+def test_overrides_load_and_carry_a_reason(path):
+    """Both the file shipped with the package and the fixture's own."""
+    overrides = identity.load_overrides(path)
     assert overrides
     for override in overrides:
         assert len(override.fighter_id) == 16

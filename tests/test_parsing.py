@@ -8,7 +8,7 @@ from ufc.ingest import parsing as p
 
 
 def test_clean_collapses_whitespace():
-    assert p.clean("  UFC 334:  Gane vs. Hokit ") == "UFC 334: Gane vs. Hokit"
+    assert p.clean("  UFC 900:  Valcourt vs. Hollin ") == "UFC 900: Valcourt vs. Hollin"
 
 
 @pytest.mark.parametrize(
@@ -17,7 +17,7 @@ def test_clean_collapses_whitespace():
         ("Jiří Procházka", "Jiri Prochazka"),
         ("Waldo Cortes-Acosta", "Waldo Cortes Acosta"),
         ("Raul Rosas Jr.", "raul rosas jr"),
-        ("Joel Thomas ", "Joel Thomas"),
+        ("Jules Tomlin ", "Jules Tomlin"),
     ],
 )
 def test_name_key_matches_spelling_variants(left, right):
@@ -29,16 +29,16 @@ def test_name_key_keeps_different_names_apart():
 
 
 def test_id_from_url():
-    url = "http://ufcstats.com/fight-details/30dbf1eceb2e1f8d"
-    assert p.id_from_url(url, "fight") == "30dbf1eceb2e1f8d"
+    url = "http://ufcstats.com/fight-details/b000000000000001"
+    assert p.id_from_url(url, "fight") == "b000000000000001"
 
 
 @pytest.mark.parametrize(
     ("url", "kind"),
     [
-        ("http://ufcstats.com/fight-details/30dbf1eceb2e1f8d", "event"),
-        ("http://ufcstats.com/fight-details/30dbf1eceb2e1f8", "fight"),
-        ("http://example.com/fight-details/30dbf1eceb2e1f8d", "fight"),
+        ("http://ufcstats.com/fight-details/b000000000000001", "event"),
+        ("http://ufcstats.com/fight-details/b00000000000001", "fight"),
+        ("http://example.com/fight-details/b000000000000001", "fight"),
         ("", "fighter"),
     ],
 )
@@ -145,9 +145,12 @@ def test_parse_outcome_rejects_unknown_code():
 
 
 def test_split_bout():
-    assert p.split_bout("Ciryl Gane vs. Josh Hokit") == ("Ciryl Gane", "Josh Hokit")
+    assert p.split_bout("Orin Valcourt vs. Dax Hollin") == (
+        "Orin Valcourt",
+        "Dax Hollin",
+    )
     with pytest.raises(p.ParseError):
-        p.split_bout("Ciryl Gane")
+        p.split_bout("Orin Valcourt")
 
 
 @pytest.mark.parametrize(
