@@ -257,6 +257,21 @@ def test_first_refresh_stores_predicts_labels_and_publishes(world):
     assert record["staleness"]["missing_events"][0]["page"] == "UFC Past"
     assert record["model"]["version"] == result.model_version
     assert "Wikipedia" in record["attribution"]
+    # Every predicted bout carries its plain-language "why", stored with the
+    # prediction, written for the fighter the prediction favours.
+    for event in record["events"]:
+        for bout in event["bouts"]:
+            why = bout["why"]
+            favoured = bout["predicted_winner"]
+            assert why is not None and why["favoured"] == favoured
+            if favoured is None:
+                assert why["summary"].startswith("The model rates this bout even")
+                continue
+            assert why["summary"].startswith("The model favours")
+            assert bout[favoured]["name"] in why["summary"]
+            assert len(why["for"]) <= 3
+    stored = query(world, "SELECT shap_json FROM predictions")
+    assert all(json.loads(r["shap_json"])["log_odds_toward_a"] for r in stored)
 
 
 def test_backfill_fills_gaps_only_and_never_overrides_upstream(world):

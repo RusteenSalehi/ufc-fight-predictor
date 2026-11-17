@@ -59,7 +59,8 @@ def snapshot(
             """
             SELECT b.*, p.prediction_id, p.model_version, p.created_at,
                    p.p_fighter_a, p.p_fighter_b, p.limited_data,
-                   p.limited_reasons_json, p.is_live, p.features_json
+                   p.limited_reasons_json, p.is_live, p.features_json,
+                   p.shap_json
             FROM upcoming_bouts b
             LEFT JOIN predictions p
               ON p.bout_id = b.bout_id AND p.superseded_at IS NULL
@@ -106,6 +107,10 @@ def snapshot(
                     "model_input_names": sorted(
                         json.loads(row["features_json"])["model_inputs"]
                     ),
+                    # Rows made before explanations existed have none.
+                    "why": json.loads(row["shap_json"])["why"]
+                    if row["shap_json"]
+                    else None,
                 }
             )
         if not bouts and not unresolved:

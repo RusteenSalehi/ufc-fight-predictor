@@ -35,6 +35,7 @@ from ufc.ingest.parsing import name_key
 from ufc.models.recipe import Candidate
 from ufc.predict.backfill import FIELDS, attribute_sources
 from ufc.predict.cards_db import supersede
+from ufc.predict.explain import explain_bout
 from ufc.predict.staleness import Staleness
 
 ATTRIBUTE_LABELS = {
@@ -139,7 +140,8 @@ def predict_upcoming(
         on = date.fromisoformat(bout["event_date"])
         a_ref, b_ref = bout["fighter_a_ref"], bout["fighter_b_ref"]
         matchup = build_matchup(store, a_ref, b_ref, on, bout["weight_class"])
-        p_a, p_b = candidate.predict_pair(model_inputs(matchup, names))
+        x = model_inputs(matchup, names)
+        p_a, p_b = candidate.predict_pair(x)
         p_a, p_b = float(p_a[0]), float(p_b[0])
         fighter_names = (bout["name_a"], bout["name_b"])
         stale = staleness.bout_reasons(
@@ -186,13 +188,15 @@ def predict_upcoming(
             "weight_class": bout["weight_class"],
             "event_date": on.isoformat(),
         }
+        # Derived from the inputs and the model, so not part of the digest.
+        explanation = explain_bout(candidate, x, matchup, fighter_names, p_a, p_b)
         conn.execute(
             """
             INSERT INTO predictions
                 (bout_id, model_version, created_at, event_date, fighter_a_ref,
                  fighter_b_ref, p_fighter_a, p_fighter_b, inputs_sha256,
                  features_json, shap_json, limited_data, limited_reasons_json, is_live)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 bout["bout_id"],
@@ -205,6 +209,7 @@ def predict_upcoming(
                 p_b,
                 digest,
                 json.dumps(features, sort_keys=True),
+                json.dumps(explanation, sort_keys=True, allow_nan=False),
                 int(bool(reasons)),
                 json.dumps(reasons),
                 int(now[:10] < on.isoformat()),
