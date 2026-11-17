@@ -94,7 +94,11 @@ def synthetic_frame(
     no_stats = a_debut | b_debut
     for name in ("d_slpm_career", "d_td_per15_career", "d_win_rate_career"):
         frame.loc[no_stats, name] = np.nan
-    frame.loc[rng.random(n) < 0.08, ["d_height_cm", "d_reach_cm"]] = np.nan
+    no_reach = rng.random(n) < 0.08
+    frame.loc[no_reach, ["d_height_cm", "d_reach_cm"]] = np.nan
+    # In most of those bouts only one profile is incomplete: an attribute gap.
+    gap_side = rng.random(n)
+    a_gap, b_gap = no_reach & (gap_side < 0.45), no_reach & (gap_side > 0.55)
     frame.loc[a_debut & b_debut, "d_elo"] = 0.0
     for name in SHRUNK:
         frame[name] /= 1.0 + shrink / 15.0
@@ -122,6 +126,8 @@ def synthetic_frame(
             "b_debut": b_debut,
             "a_no_stats": a_debut,
             "b_no_stats": b_debut,
+            "a_attr_gap": a_gap,
+            "b_attr_gap": b_gap,
         }
     )
     return pd.concat([context, frame], axis=1)
@@ -137,6 +143,7 @@ def mirrored(frame: pd.DataFrame) -> pd.DataFrame:
     )
     out["a_debut"], out["b_debut"] = frame["b_debut"], frame["a_debut"]
     out["a_no_stats"], out["b_no_stats"] = frame["b_no_stats"], frame["a_no_stats"]
+    out["a_attr_gap"], out["b_attr_gap"] = frame["b_attr_gap"], frame["a_attr_gap"]
     out[list(FEATURES)] = -frame[list(FEATURES)]
     out["label"] = 1.0 - frame["label"]
     return out

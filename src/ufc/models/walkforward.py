@@ -33,7 +33,7 @@ from ufc.features.data import FeatureData
 from ufc.models.metrics import summary
 from ufc.models.recipe import Recipe, fit_recipe
 from ufc.models.select import baseline_predictions
-from ufc.models.splits import SPLIT_DATES, SplitDates, Splits, labelled
+from ufc.models.splits import SPLIT_DATES, SplitDates, Splits, fit_rows, labelled
 
 FIRST_YEAR = 2013
 """The first year scored. Its model is fitted on bouts through 2010, the
@@ -72,7 +72,7 @@ def run_fold(
     splits = Splits(build.frame, dates, test_dates=test_dates)
     if unlocked_for is not None:
         splits.unlock_test(unlocked_for)
-    train, valid = labelled(splits.train()), labelled(splits.valid())
+    train, valid = fit_rows(splits.train()), labelled(splits.valid())
     scored = labelled(
         splits.between(date(year, 1, 1), date(year, 12, 31), f"walk-forward {year}")
     )

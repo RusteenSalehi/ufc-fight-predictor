@@ -20,7 +20,7 @@ from ufc.models.metrics import (
     reliability_table,
     summary,
 )
-from ufc.models.splits import labelled
+from ufc.models.splits import attribute_gap, labelled
 
 MIN_GROUP = 100
 """A weight class is reported on its own only with at least this many scored
@@ -127,14 +127,19 @@ def evaluate_period(
     }
 
     # Height and reach are often missing for recent debutants
-    # (docs/DATA_QUALITY.md), and almost never in the training period.
+    # (docs/DATA_QUALITY.md). Bouts with an attribute gap are never fitted
+    # on (DECISIONS D44), so here the model is scored on bouts of a kind it
+    # has not seen.
     incomplete = (scored["d_height_cm"].isna() | scored["d_reach_cm"].isna()).to_numpy()
+    gap = attribute_gap(scored).to_numpy()
     result["by_attributes"] = _groups(
         predictions,
         y,
         {
             "height and reach known for both": ~incomplete,
-            "height or reach missing": incomplete,
+            "height or reach missing for either": incomplete,
+            "no attribute gap": ~gap,
+            "an attribute known for one fighter only": gap,
         },
     )
     result["equal_elo"] = int((scored["d_elo"] == 0).sum())

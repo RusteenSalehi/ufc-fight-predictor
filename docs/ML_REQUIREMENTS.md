@@ -13,7 +13,7 @@ For a bout between fighters A and B, estimate P(A wins). P(B wins) = 1 - P(A win
 
 1. **As-of cutoff.** Every feature for a bout on date D uses only bouts from events with date strictly before D. Other bouts on the same event never count.
 2. **No profile aggregates.** Career stats shown on UFCStats fighter pages are never used. Every stat is recomputed from per-fight data as of the cutoff.
-3. **Static attributes.** Height, reach, stance, and date of birth come from current profiles. Assumed effectively static; document this assumption. Age is computed as of the bout date.
+3. **Static attributes.** Height, reach, stance, and date of birth come from current profiles. Assumed effectively static; document this assumption. Age is computed as of the bout date. The values are treated as static; whether a value is *present* is not. A profile is as it stands today, and an incomplete one mostly belongs to a fighter whose UFC career turned out short, so a bout in which one fighter's profile lacks an attribute the other's has is never used to fit a model. Such bouts are still predicted and scored, and reported separately.
 4. **Fit on training data only.** Scalers, imputers, Elo parameters, opponent-adjustment baselines, the weight-class means used for rate shrinkage, clustering, calibration, and any other fitted transformation are fit on the training period only (calibration on validation).
 5. **Tests prove it.** Required tests:
    - Perturbation test: change or delete bouts after date D; features for bouts on or before D must not change.

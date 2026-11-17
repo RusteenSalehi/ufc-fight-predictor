@@ -20,9 +20,11 @@ from ufc.models.design import labels
 from ufc.models.evaluate import evaluate_period
 from ufc.models.gbm import LIBRARIES
 from ufc.models.metrics import log_loss
-from ufc.models.recipe import Recipe, fit_data
+from ufc.models.recipe import Recipe, fit_data, fit_recipe
 from ufc.models.select import (
+    _rows,
     ablate,
+    attribute_gap_record,
     choose_half_life,
     choose_shrinkage,
     search,
@@ -33,7 +35,9 @@ from ufc.models.splits import (
     SPLIT_DATES,
     Splits,
     TestPeriodLocked,
+    attribute_gap,
     development_only,
+    fit_rows,
     labelled,
 )
 from ufc.models.tune import (
@@ -281,6 +285,78 @@ def test_ablation_removes_each_family_once(selection):
     assert rating["helped"] and rating["delta_low"] > 0
 
 
+def leaky_frame():
+    """A table in which an incomplete profile gives the outcome away, as it
+    does in the real training period: the fighter with the gap always loses,
+    and he is the debutant, so a model can tell which one he is."""
+    frame = synthetic_frame(seed=13)
+    rng = np.random.default_rng(13)
+    n = len(frame)
+    gap = rng.random(n) < 0.25
+    a_side = rng.random(n) < 0.5
+    frame["a_attr_gap"], frame["b_attr_gap"] = gap & a_side, gap & ~a_side
+    frame["a_debut"], frame["b_debut"] = frame["a_attr_gap"], frame["b_attr_gap"]
+    frame["d_n_fights"] = np.where(
+        frame["a_attr_gap"],
+        -6.0,
+        np.where(frame["b_attr_gap"], 6.0, frame["d_n_fights"]),
+    )
+    frame.loc[gap, ["d_height_cm", "d_reach_cm"]] = np.nan
+    frame.loc[~gap, ["d_height_cm", "d_reach_cm"]] = rng.normal(
+        size=(int((~gap).sum()), 2)
+    )
+    lost = frame["a_attr_gap"].to_numpy()
+    won = frame["b_attr_gap"].to_numpy()
+    label = np.where(lost, 0.0, np.where(won, 1.0, frame["label"]))
+    frame["label"] = np.where(frame["result"] == "win", label, np.nan)
+    return frame
+
+
+def test_attribute_gap_bouts_are_measured_but_never_fitted_on():
+    frame = leaky_frame()
+    splits = Splits(frame)
+    record = attribute_gap_record(splits)
+    scored = labelled(splits.train())
+    assert record["n_train_scored"] == len(scored)
+    assert (
+        record["n_train_gap"]
+        == record["n_train_one_sided"]
+        == int(attribute_gap(scored).sum())
+    )
+    assert record["complete_profile_won"] == 1.0  # how the table was built
+    assert (
+        sum(p["n"] for p in record["one_sided_by_period"].values())
+        == record["n_train_gap"]
+    )
+    assert record["n_train_fitted"] == len(scored) - record["n_train_gap"]
+
+    train, valid = _rows(splits, "a test")
+    assert len(train) == record["n_train_fitted"] and not attribute_gap(train).any()
+    assert attribute_gap(valid).any()  # validation keeps every bout with a winner
+
+
+def test_a_model_fitted_without_gap_bouts_cannot_use_the_gap():
+    """The leak has teeth: fitted on every bout, a model learns that the
+    fighter with the incomplete profile loses. Fitted the way the pipeline
+    fits, it has never seen a gap go with an outcome and stays unsure."""
+    frame = leaky_frame()
+    splits = Splits(frame)
+    valid = labelled(splits.valid())
+    gap_bouts = valid[attribute_gap(valid)]
+    recipe = Recipe(FAST["xgboost"], None, SPEC, PLATT)
+    confidence = {}
+    for name, train in (
+        ("every bout", labelled(splits.train())),
+        ("pipeline", fit_rows(splits.train())),
+    ):
+        candidate, _ = fit_recipe(recipe, train, valid, SPLIT_DATES.train_end)
+        p = candidate.predict(gap_bouts, calibrated=False)
+        complete_wins = np.where(gap_bouts["a_attr_gap"], 1 - p, p)
+        confidence[name] = float(complete_wins.mean())
+    assert confidence["every bout"] > 0.85
+    assert confidence["pipeline"] < 0.70
+
+
 def test_every_stage_refuses_to_run_once_the_test_period_is_open(frames):
     def unlocked():
         splits = Splits(frames[0.0])
@@ -349,7 +425,12 @@ def test_evaluate_period_counts_no_results_and_breaks_down(frames):
         == debut["any debutant"]["model"]["n"]
     )
     attributes = record["by_attributes"]
-    assert sum(g["model"]["n"] for g in attributes.values()) == len(scored)
+    known = attributes["height and reach known for both"]["model"]["n"]
+    missing = attributes["height or reach missing for either"]["model"]["n"]
+    gap = attributes["an attribute known for one fighter only"]["model"]["n"]
+    assert known + missing == len(scored)
+    assert attributes["no attribute gap"]["model"]["n"] + gap == len(scored)
+    assert 0 < gap == int(attribute_gap(scored).sum()) <= missing
     assert record["models"]["elo"]["log_loss"] == pytest.approx(np.log(2))
     assert record["models"]["elo"]["accuracy"] == 0.5
     assert record["primary_minus"]["elo"]["mean"] == pytest.approx(

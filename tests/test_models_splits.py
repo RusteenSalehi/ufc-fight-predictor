@@ -12,7 +12,9 @@ from ufc.models.splits import (
     SplitDates,
     Splits,
     TestPeriodLocked,
+    attribute_gap,
     development_only,
+    fit_rows,
     labelled,
     recency_weights,
 )
@@ -95,6 +97,19 @@ def test_labelled_drops_draws_and_no_contests(frame):
     assert set(frame["result"]) == {"win", "draw", "nc"}
     assert set(kept["result"]) == {"win"} and kept["label"].notna().all()
     assert len(kept) < len(frame)
+
+
+def test_fit_rows_leave_out_bouts_with_an_attribute_gap(frame):
+    kept = fit_rows(frame)
+    scored = labelled(frame)
+    gap = attribute_gap(scored)
+    assert gap.any() and (scored["a_attr_gap"] & ~scored["b_attr_gap"]).any()
+    assert len(kept) == len(scored) - gap.sum()
+    assert not attribute_gap(kept).any() and kept["label"].notna().all()
+    # Bouts where both profiles are equally incomplete stay in.
+    assert kept["d_reach_cm"].isna().any()
+    # They are left out of fitting only: scoring still sees every bout.
+    assert set(scored["bout_id"]) > set(kept["bout_id"])
 
 
 def test_recency_weights_halve_per_half_life_and_average_one():

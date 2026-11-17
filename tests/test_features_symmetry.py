@@ -71,6 +71,10 @@ def test_swapping_fighters_negates_every_difference_feature_exactly(built):
             ba.flags["a_debut"],
             ba.flags["a_no_stats"],
         )
+        assert (ab.flags["a_attr_gap"], ab.flags["b_attr_gap"]) == (
+            ba.flags["b_attr_gap"],
+            ba.flags["a_attr_gap"],
+        )
 
 
 def _same_values(left: dict, right: dict) -> bool:
@@ -95,6 +99,8 @@ def test_mirror_swaps_flags_and_labels_and_is_its_own_inverse(built):
     mirrored = mirror(frame)
     assert mirrored["a_debut"].equals(frame["b_debut"])
     assert mirrored["b_no_stats"].equals(frame["a_no_stats"])
+    assert mirrored["a_attr_gap"].equals(frame["b_attr_gap"])
+    assert mirrored["b_attr_gap"].equals(frame["a_attr_gap"])
     labelled = frame["label"].notna()
     assert (mirrored.loc[labelled, "label"] == 1 - frame.loc[labelled, "label"]).all()
     assert mirrored.loc[~labelled, "label"].isna().all()
@@ -114,6 +120,33 @@ def test_every_model_feature_is_a_difference_and_none_is_an_outcome():
     # Swap-invariant columns are kept apart from the antisymmetric features.
     assert all(name.startswith("lvl_") for name in LEVEL_NAMES)
     assert not set(LEVEL_NAMES) & set(FEATURE_NAMES)
+
+
+def test_attribute_gap_flags_the_fighter_whose_profile_lacks_what_the_other_has():
+    league = League()
+    full = league.fighter()
+    no_reach = league.fighter(reach_cm=None)
+    no_dob = league.fighter(dob=None)
+    bare = league.fighter(height_cm=None, reach_cm=None, stance=None, dob=None)
+    also_bare = league.fighter(height_cm=None, reach_cm=None, stance=None, dob=None)
+    league.bout(league.event(D0), full, no_reach)
+    store = build_features(league.data(), NO_PRIOR, plain_params()).store
+    on = D0 + timedelta(days=30)
+
+    def gaps(a, b):
+        flags = build_matchup(store, a, b, on).flags
+        return flags["a_attr_gap"], flags["b_attr_gap"]
+
+    assert gaps(full, no_reach) == (False, True)
+    assert gaps(no_reach, full) == (True, False)
+    assert gaps(full, bare) == (False, True)
+    # Each lacks something the other has.
+    assert gaps(no_reach, no_dob) == (True, True)
+    # Both lack everything: nothing tells them apart, so no gap.
+    assert gaps(bare, also_bare) == (False, False)
+    # A fighter with no profile at all is treated like an empty profile.
+    assert gaps(full, "0" * 16) == (False, True)
+    assert gaps(bare, "0" * 16) == (False, False)
 
 
 def test_level_columns_are_the_mean_of_the_two_fighters():

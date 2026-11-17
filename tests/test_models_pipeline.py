@@ -23,7 +23,14 @@ from ufc.models.calibrate import PLATT
 from ufc.models.design import FeatureSpec
 from ufc.models.recipe import Recipe, fit_recipe
 from ufc.models.report import BEGIN, END
-from ufc.models.splits import SPLIT_DATES, Splits, TestPeriodLocked, labelled
+from ufc.models.splits import (
+    SPLIT_DATES,
+    Splits,
+    TestPeriodLocked,
+    attribute_gap,
+    fit_rows,
+    labelled,
+)
 from ufc.models.walkforward import FIRST_YEAR, fold_dates, run_fold, walk_forward
 
 
@@ -82,11 +89,11 @@ def test_first_test_period_fold_is_the_model_the_main_split_produces(data):
     fold = run_fold(data, RECIPE, CONFIG, 0.01, 2025, "v")
     frame = build_features(data, CONFIG).frame
     splits = Splits(frame)
+    train = fit_rows(splits.train())
+    assert attribute_gap(labelled(splits.train())).any()  # the league has such bouts
+    assert not attribute_gap(train).any() and fold["n_train"] == len(train)
     candidate, _ = fit_recipe(
-        RECIPE,
-        labelled(splits.train()),
-        labelled(splits.valid()),
-        SPLIT_DATES.train_end,
+        RECIPE, train, labelled(splits.valid()), SPLIT_DATES.train_end
     )
     splits.unlock_test("v")
     test = labelled(splits.test())
@@ -171,7 +178,10 @@ def test_train_saves_a_candidate_and_writes_the_selection_record(workspace):
     assert registry.list_versions(workspace["models"]) == [version]
     candidate, manifest = registry.load_candidate(workspace["models"], version)
     assert manifest["dataset"]["source_commit"] is None  # the league has no snapshot
-    assert manifest["dataset"]["n_training_bouts"] == selection["n_train_scored"]
+    gap = selection["attribute_gap"]
+    assert manifest["dataset"]["n_training_bouts"] == gap["n_train_fitted"]
+    assert gap["n_train_fitted"] == selection["n_train_scored"] - gap["n_train_gap"]
+    assert 0 < gap["n_train_one_sided"] <= gap["n_train_gap"]
     assert candidate.recipe.to_dict() == selection["selected"]["recipe"]
     assert candidate.model.n_trees == selection["selected"]["n_trees"]
 

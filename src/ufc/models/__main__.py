@@ -39,7 +39,13 @@ from ufc.models.evaluate import evaluate_period
 from ufc.models.gbm import MAX_TREES, PATIENCE
 from ufc.models.report import write_report
 from ufc.models.select import SelectionSettings, baseline_predictions, select
-from ufc.models.splits import SPLIT_DATES, Splits, development_only, labelled
+from ufc.models.splits import (
+    SPLIT_DATES,
+    Splits,
+    development_only,
+    fit_rows,
+    labelled,
+)
 from ufc.models.tune import SEARCH_SPACE
 from ufc.models.walkforward import FIRST_YEAR, walk_forward
 
@@ -118,7 +124,7 @@ def run_train(args: argparse.Namespace) -> int:
     kept = splits[selection.shrink_minutes]
     kept.assert_test_locked("saving the candidate")
     spec = selection.recipe.spec
-    train, valid = labelled(kept.train()), labelled(kept.valid())
+    train, valid = fit_rows(kept.train()), labelled(kept.valid())
     recipe = selection.recipe.to_dict()
     config = {
         "recipe": {k: recipe[k] for k in ("gbm", "half_life_years", "calibration")},
@@ -236,7 +242,7 @@ def run_evaluate(args: argparse.Namespace) -> int:
         return 1
 
     splits = Splits(frame)
-    train = labelled(splits.train())
+    train = fit_rows(splits.train())
     assert registry.dataset_hash(train, spec) == manifest["dataset"]["training_sha256"]
 
     # From here on the test period is open, for this saved version only.

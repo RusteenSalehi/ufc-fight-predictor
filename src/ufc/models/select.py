@@ -34,7 +34,7 @@ from ufc.models.evaluate import evaluate_period
 from ufc.models.gbm import LIBRARIES, GbmConfig
 from ufc.models.metrics import bout_log_loss, log_loss
 from ufc.models.recipe import Candidate, Recipe, fit_data, fit_recipe
-from ufc.models.splits import Splits, labelled
+from ufc.models.splits import Splits, attribute_gap, fit_rows, labelled
 from ufc.models.tune import (
     HALF_LIVES,
     N_TRIALS,
@@ -60,9 +60,53 @@ LEVEL_GROUP = "level"
 
 
 def _rows(splits: Splits, stage: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Training and validation bouts that have a winner."""
+    """Bouts to fit on (a winner, no attribute gap) and validation bouts to
+    score on (a winner)."""
     splits.assert_test_locked(stage)
-    return labelled(splits.train()), labelled(splits.valid())
+    return fit_rows(splits.train()), labelled(splits.valid())
+
+
+def attribute_gap_record(splits: Splits) -> dict:
+    """How often the fighter with the complete profile won, in training bouts
+    where only one profile has a gap. This is why they are not fitted on."""
+    splits.assert_test_locked("attribute-gap summary")
+    train, valid = labelled(splits.train()), labelled(splits.valid())
+    one_sided = train[train["a_attr_gap"] != train["b_attr_gap"]]
+    complete_won = np.where(
+        one_sided["a_attr_gap"], 1.0 - one_sided["label"], one_sided["label"]
+    )
+    by_period = {}
+    years = one_sided["date"].dt.year
+    for low, high in (
+        (None, 2005),
+        (2006, 2010),
+        (2011, 2014),
+        (2015, 2018),
+        (2019, None),
+    ):
+        mask = (years >= (low or 0)) & (years <= (high or 9999))
+        label = (
+            f"through {high}"
+            if low is None
+            else f"from {low}"
+            if high is None
+            else f"{low} to {high}"
+        )
+        by_period[label] = {
+            "n": int(mask.sum()),
+            "complete_profile_won": float(complete_won[mask.to_numpy()].mean())
+            if mask.any()
+            else None,
+        }
+    return {
+        "n_train_scored": len(train),
+        "n_train_gap": int(attribute_gap(train).sum()),
+        "n_train_one_sided": len(one_sided),
+        "complete_profile_won": float(complete_won.mean()) if len(one_sided) else None,
+        "one_sided_by_period": by_period,
+        "n_train_fitted": len(fit_rows(splits.train())),
+        "n_validation_gap": int(attribute_gap(valid).sum()),
+    }
 
 
 def _half_life_label(half_life: float | None) -> str:
@@ -483,6 +527,7 @@ def select(
     for name, rows in (("train", splits.train()), ("validation", splits.valid())):
         report[f"n_{name}_bouts"] = len(rows)
         report[f"n_{name}_scored"] = int(rows["label"].notna().sum())
+    report["attribute_gap"] = attribute_gap_record(splits)
 
     report["levels"] = try_level_features(splits, base, level_names, seeds, n_jobs)
     spec = base.with_symmetric(level_names) if report["levels"]["kept"] else base

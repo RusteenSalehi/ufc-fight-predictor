@@ -74,6 +74,26 @@ def labelled(frame: pd.DataFrame) -> pd.DataFrame:
     return frame[frame["label"].notna()]
 
 
+def attribute_gap(frame: pd.DataFrame) -> pd.Series:
+    """Bouts where one fighter's profile lacks a physical attribute that the
+    other's has."""
+    return frame["a_attr_gap"] | frame["b_attr_gap"]
+
+
+def fit_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """The bouts a model may be fitted on: a winner, and no attribute gap.
+
+    Profiles are as they stand today. In older years an incomplete profile
+    mostly belongs to a fighter whose UFC career turned out short, so in a
+    bout where only one profile is incomplete, knowing which one says who
+    probably lost: information from after the bout. A model fitted on those
+    bouts learns it. Leaving them out of fitting means no model ever sees a
+    case where a gap goes with an outcome (docs/DECISIONS.md, D44). They are
+    still predicted and scored like any other bout.
+    """
+    return frame[frame["label"].notna() & ~attribute_gap(frame)]
+
+
 def _between(frame: pd.DataFrame, start: date | None, end: date | None) -> pd.Series:
     mask = pd.Series(True, index=frame.index)
     if start is not None:

@@ -97,9 +97,28 @@ FEATURES: tuple[Feature, ...] = (
 """Model features, in column order. All are A-minus-B and start with ``d_``."""
 
 FEATURE_NAMES: tuple[str, ...] = tuple(f.name for f in FEATURES)
-FLAG_NAMES: tuple[str, ...] = ("a_debut", "b_debut", "a_no_stats", "b_no_stats")
-"""Per-fighter indicators, not differenced. ``debut``: no earlier UFC bout.
-``no_stats``: no earlier bout with recorded stats (true for every debut)."""
+FLAG_NAMES: tuple[str, ...] = (
+    "a_debut",
+    "b_debut",
+    "a_no_stats",
+    "b_no_stats",
+    "a_attr_gap",
+    "b_attr_gap",
+)
+"""Per-fighter indicators, not differenced, and never model inputs.
+``debut``: no earlier UFC bout. ``no_stats``: no earlier bout with recorded
+stats (true for every debut). ``attr_gap``: the fighter's profile lacks a
+physical attribute (height, reach, stance or date of birth) that the other
+fighter's profile has.
+
+``attr_gap`` exists so that training can leave such bouts out. Profiles are
+as they stand today, and in older years an incomplete one mostly belongs to a
+fighter whose UFC career turned out short. Which of two fighters has the gap
+is therefore information from after the bout (docs/DECISIONS.md, D44)."""
+
+_PROFILE_IDX = np.array(
+    [POS[n] for n in ("height_cm", "reach_cm", "stance_orthodox", "age")]
+)
 
 assert {f.family for f in FEATURES} == set(FAMILIES)
 
@@ -163,10 +182,18 @@ def matchup_arrays(
     return MatchupArrays(a, b, features, levels)
 
 
-def flags_from(a: np.ndarray, b: np.ndarray) -> tuple[bool, bool, bool, bool]:
+def flags_from(a: np.ndarray, b: np.ndarray) -> tuple[bool, ...]:
     """Values for ``FLAG_NAMES``."""
     debut, no_stats = POS["debut"], POS["no_stats"]
-    return (bool(a[debut]), bool(b[debut]), bool(a[no_stats]), bool(b[no_stats]))
+    a_missing, b_missing = np.isnan(a[_PROFILE_IDX]), np.isnan(b[_PROFILE_IDX])
+    return (
+        bool(a[debut]),
+        bool(b[debut]),
+        bool(a[no_stats]),
+        bool(b[no_stats]),
+        bool((a_missing & ~b_missing).any()),
+        bool((b_missing & ~a_missing).any()),
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -169,6 +169,41 @@ def _header(selection: Mapping, manifest: Mapping, config: Mapping) -> list[str]
     return lines
 
 
+def _attribute_gap(selection: Mapping) -> list[str]:
+    gap = selection["attribute_gap"]
+    rows = [
+        [period, row["n"], pct(row["complete_profile_won"])]
+        for period, row in gap["one_sided_by_period"].items()
+        if row["n"]
+    ]
+    return [
+        "## Bouts left out of fitting: attribute gaps",
+        "",
+        (
+            "A bout has an attribute gap when one fighter's profile lacks a physical "
+            "attribute (height, reach, stance or date of birth) that the other's has. "
+            f"Of the {gap['n_train_scored']:,} training bouts with a winner, "
+            f"{gap['n_train_gap']:,} have a gap. In the {gap['n_train_one_sided']:,} where only "
+            "one fighter has a gap, the fighter with the complete profile won "
+            f"**{pct(gap['complete_profile_won'])}** of the time:"
+        ),
+        "",
+        table(
+            ["training bouts dated", "gap on one side only", "complete profile won"],
+            rows,
+        ),
+        "",
+        (
+            "Profiles are as they stand today, so which fighter has the gap is information "
+            "from after the bout (DECISIONS D44). No model or baseline is fitted on these "
+            f"bouts: fitting uses the other {gap['n_train_fitted']:,} training bouts. "
+            "They are still predicted and scored. Validation has "
+            f"{gap['n_validation_gap']} bouts with a gap."
+        ),
+        "",
+    ]
+
+
 def _shrinkage(selection: Mapping) -> list[str]:
     stage = selection["shrinkage"]
     rows = [
@@ -708,6 +743,7 @@ def generated_block(
 ) -> str:
     lines: list[str] = []
     lines += _header(selection, manifest, config)
+    lines += _attribute_gap(selection)
     lines += _shrinkage(selection)
     lines += _levels(selection)
     lines += _search(selection, config)
