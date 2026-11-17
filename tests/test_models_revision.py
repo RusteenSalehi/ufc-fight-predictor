@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from ufc.models.revision import (
+    adoption,
     logit_shift,
     older_view,
     paired_slice_change,
@@ -108,3 +109,142 @@ def test_paired_slice_change_reports_movement_toward_the_older_fighter():
     assert row["log_loss_delta"] < 0
     assert row["gap_reference"] == pytest.approx(-0.6)
     assert row["gap_variant"] == pytest.approx(-0.5)
+
+
+def _slice(gap: float, log_loss: float) -> dict:
+    return {"gap": gap, "log_loss": log_loss}
+
+
+def _record(variants: dict) -> tuple[dict, pd.DataFrame]:
+    """A run record with the D54 rule's inputs, and per-seed validation
+    columns so that the tie-break can be computed."""
+    rng = np.random.default_rng(0)
+    y = (rng.random(400) < 0.5).astype(float)
+    valid = pd.DataFrame({"label": y})
+    record = {
+        "variants": {},
+        "validation": {"variants": {}, "slices": {}},
+        "backtest_2013_2024": {"slices": {}},
+    }
+    for name, spec in variants.items():
+        p = np.clip(0.5 + spec["edge"] * (y - 0.5), 0.01, 0.99)
+        valid[f"{name}|0|raw"] = p
+        record["variants"][name] = {
+            "antisymmetric_added": ["x"] * spec["inputs"],
+            "symmetric_added": [],
+            "feature_settings": {},
+        }
+        record["validation"]["variants"][name] = {
+            "raw": {"log_loss": spec["val_ll"], "delta_interval": [spec["low"], 0.01]}
+        }
+        record["validation"]["slices"][name] = {
+            "elite_veteran_+50": _slice(0.1, spec["val_slice_ll"])
+        }
+        record["backtest_2013_2024"]["slices"][name] = {
+            "elite_veteran_+50": _slice(spec["gap"], spec["back_slice_ll"])
+        }
+    return record, valid
+
+
+BASE = {
+    "inputs": 0,
+    "edge": 0.10,
+    "val_ll": 0.64,
+    "low": 0.0,
+    "gap": 0.05,
+    "back_slice_ll": 0.68,
+    "val_slice_ll": 0.63,
+}
+
+
+def test_adoption_applies_each_criterion():
+    record, valid = _record(
+        {
+            "base": BASE,
+            # worse beyond noise on validation
+            "worse": {
+                **BASE,
+                "inputs": 1,
+                "low": 0.001,
+                "gap": 0.01,
+                "back_slice_ll": 0.6,
+            },
+            # better calibrated but higher slice loss on the backtest
+            "lossier": {**BASE, "inputs": 1, "gap": 0.01, "back_slice_ll": 0.69},
+            # slice loss up on validation
+            "val_slice": {
+                **BASE,
+                "inputs": 1,
+                "gap": 0.01,
+                "back_slice_ll": 0.6,
+                "val_slice_ll": 0.64,
+            },
+            # over-corrects: |gap| the same size in the other direction
+            "flipped": {**BASE, "inputs": 1, "gap": -0.05, "back_slice_ll": 0.6},
+            "good": {**BASE, "inputs": 2, "gap": -0.02, "back_slice_ll": 0.6},
+        }
+    )
+    result = adoption(record, valid)
+    passes = {n: r["passes"] for n, r in result["variants"].items()}
+    assert passes == {
+        "worse": False,
+        "lossier": False,
+        "val_slice": False,
+        "flipped": False,
+        "good": True,
+    }
+    assert result["recommended"] == "good"
+
+
+def test_adoption_tie_break_goes_to_fewer_inputs_inside_noise():
+    record, valid = _record(
+        {
+            "base": BASE,
+            "big": {
+                **BASE,
+                "inputs": 7,
+                "val_ll": 0.630,
+                "gap": 0.0,
+                "back_slice_ll": 0.6,
+            },
+            "small": {
+                **BASE,
+                "inputs": 3,
+                "val_ll": 0.631,
+                "gap": 0.0,
+                "back_slice_ll": 0.6,
+            },
+        }
+    )
+    # Identical validation probabilities: the paired difference is exactly zero.
+    result = adoption(record, valid)
+    assert result["passing"] == ["big", "small"]
+    assert result["tie_breaks"][0]["inside_noise"]
+    assert result["recommended"] == "small"
+
+
+def test_adoption_keeps_the_lower_loss_when_the_difference_is_clear():
+    record, valid = _record(
+        {
+            "base": BASE,
+            "big": {
+                **BASE,
+                "inputs": 7,
+                "edge": 0.6,
+                "val_ll": 0.60,
+                "gap": 0.0,
+                "back_slice_ll": 0.6,
+            },
+            "small": {
+                **BASE,
+                "inputs": 3,
+                "edge": 0.0,
+                "val_ll": 0.69,
+                "gap": 0.0,
+                "back_slice_ll": 0.6,
+            },
+        }
+    )
+    result = adoption(record, valid)
+    assert not result["tie_breaks"][0]["inside_noise"]
+    assert result["recommended"] == "big"

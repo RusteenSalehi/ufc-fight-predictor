@@ -48,9 +48,17 @@ from ufc.db.connection import connect
 from ufc.features.build import build_features
 from ufc.features.config import FeatureConfig
 from ufc.features.data import FeatureData, load_feature_data
+from ufc.features.matchup import CANDIDATE_FEATURES, CANDIDATE_LEVEL_NAMES
+from ufc.features.store import FittedParams
 from ufc.models import registry
 from ufc.models.baselines import ELO_SPEC, EloModel
-from ufc.models.calibrate import PLATT, cross_validated, fold_ids
+from ufc.models.calibrate import (
+    IDENTITY_CALIBRATOR,
+    PLATT,
+    cross_validated,
+    fit_calibrator,
+    fold_ids,
+)
 from ufc.models.design import FeatureSpec, predict
 from ufc.models.metrics import (
     CLIP,
@@ -58,8 +66,9 @@ from ufc.models.metrics import (
     bout_log_loss,
     wilson_interval,
 )
-from ufc.models.recipe import Recipe, fit_recipe
-from ufc.models.splits import SPLIT_DATES, Splits, fit_rows, labelled
+from ufc.models.recipe import Candidate, Recipe, fit_recipe
+from ufc.models.refit import fit_fixed, tree_count
+from ufc.models.splits import SPLIT_DATES, SplitDates, Splits, fit_rows, labelled
 from ufc.models.tune import SEEDS
 from ufc.models.walkforward import FIRST_YEAR, fold_dates
 
@@ -108,7 +117,27 @@ class Variant:
         return tuple(sorted(self.config.items()))
 
 
-VARIANTS: dict[str, Variant] = {"base": Variant("base")}
+def _family(name: str) -> tuple[str, ...]:
+    return tuple(f.name for f in CANDIDATE_FEATURES if f.family == name)
+
+
+_SCHEDULE = _family("schedule")
+_AGE_SHAPE = _family("age_shape")
+_CATCH = {"catch_weight_adjacent": True}
+
+VARIANTS: dict[str, Variant] = {
+    v.name: v
+    for v in (
+        Variant("base"),
+        Variant("schedule", _SCHEDULE),  # (a) family 14
+        Variant("age_shape", _AGE_SHAPE, CANDIDATE_LEVEL_NAMES),  # (b)
+        Variant("catch_weight", config=_CATCH),  # (c)
+        Variant(
+            "combined", _SCHEDULE + _AGE_SHAPE, CANDIDATE_LEVEL_NAMES, _CATCH
+        ),  # a + b + c
+    )
+}
+"""The variants registered in DECISIONS D54, before any of them was run."""
 
 
 # --- the slice -----------------------------------------------------------------
@@ -525,6 +554,221 @@ def backtest_summary(bouts: pd.DataFrame, variants: Sequence[str]) -> dict:
     return out
 
 
+# --- the adoption rule (DECISIONS D54) ---------------------------------------------
+
+RULE_SLICE = "elite_veteran_+50"
+
+
+def adoption(record: Mapping, valid: pd.DataFrame) -> dict:
+    """Apply the rule registered in D54 to every variant but ``base``.
+
+    1. validation log loss (uncalibrated, mean over seeds): the paired 95%
+       interval of variant minus base does not lie entirely above zero;
+    2. backtest 2013 to 2024, slice ``RULE_SLICE``: smaller absolute gap and
+       lower log loss than base;
+    3. validation, same slice (seed-mean, cross-validated Platt): log loss
+       not higher than base's.
+
+    Among variants that pass, the lowest validation log loss is recommended,
+    unless its paired interval against a passing variant with fewer added
+    inputs contains zero, in which case the one with fewer inputs is.
+    """
+    val, back = record[VALIDATION], record[BACKTEST]
+    base_back = back["slices"]["base"][RULE_SLICE]
+    base_val = val["slices"]["base"][RULE_SLICE]
+    rows: dict = {}
+    for name in val["variants"]:
+        if name == "base":
+            continue
+        low = val["variants"][name]["raw"]["delta_interval"][0]
+        b, v = back["slices"][name][RULE_SLICE], val["slices"][name][RULE_SLICE]
+        criteria = {
+            "1_validation_not_worse_beyond_noise": bool(low <= 0.0),
+            "2_backtest_slice_better_calibrated": bool(
+                abs(b["gap"]) < abs(base_back["gap"])
+                and b["log_loss"] < base_back["log_loss"]
+            ),
+            "3_validation_slice_not_worse": bool(v["log_loss"] <= base_val["log_loss"]),
+        }
+        rows[name] = {
+            "criteria": criteria,
+            "passes": all(criteria.values()),
+            "n_inputs_added": len(record["variants"][name]["antisymmetric_added"])
+            + len(record["variants"][name]["symmetric_added"])
+            + len(record["variants"][name]["feature_settings"]),
+            "validation_log_loss": val["variants"][name]["raw"]["log_loss"],
+        }
+    passing = sorted(
+        (n for n, r in rows.items() if r["passes"]),
+        key=lambda n: rows[n]["validation_log_loss"],
+    )
+    recommended, tie_breaks = None, []
+    if passing:
+        recommended = passing[0]
+        for other in passing[1:]:
+            if rows[other]["n_inputs_added"] >= rows[recommended]["n_inputs_added"]:
+                continue
+            diff = bootstrap_mean_interval(
+                seed_mean_loss(valid, recommended, "raw")
+                - seed_mean_loss(valid, other, "raw"),
+                n_boot=N_BOOT,
+            )
+            within = diff["low"] <= 0.0 <= diff["high"]
+            tie_breaks.append(
+                {
+                    "lower": recommended,
+                    "fewer_inputs": other,
+                    "delta": diff["mean"],
+                    "delta_interval": [diff["low"], diff["high"]],
+                    "inside_noise": bool(within),
+                }
+            )
+            if within:
+                recommended = other
+    return {
+        "rule": "DECISIONS D54",
+        "slice": RULE_SLICE,
+        "variants": rows,
+        "passing": passing,
+        "tie_breaks": tie_breaks,
+        "recommended": recommended,
+    }
+
+
+# --- (d) calibration window of the production refit ---------------------------------
+
+
+def spread(p_a: np.ndarray) -> dict:
+    """How confident a set of probabilities is: the favourite's probability."""
+    fav = np.maximum(p_a, 1.0 - p_a)
+    q10, q50, q90 = np.quantile(fav, [0.1, 0.5, 0.9])
+    return {
+        "n": len(fav),
+        "mean_favourite": float(fav.mean()),
+        "p10": float(q10),
+        "median": float(q50),
+        "p90": float(q90),
+        "share_at_least_70": float((fav >= 0.7).mean()),
+    }
+
+
+def _oot(
+    candidate_model, recipe: Recipe, frame: pd.DataFrame, start: date, end: date
+) -> pd.DataFrame:
+    """Uncalibrated predictions of ``candidate_model`` for labelled bouts
+    dated ``start`` to ``end`` without an attribute gap (as D47 fits the
+    slope), with their labels and dates."""
+    rows = frame[
+        (frame["date"] >= pd.Timestamp(start))
+        & (frame["date"] <= pd.Timestamp(end))
+        & frame["label"].notna()
+        & ~(frame["a_attr_gap"] | frame["b_attr_gap"])
+    ]
+    p = Candidate(recipe, candidate_model, IDENTITY_CALIBRATOR).predict(
+        rows, calibrated=False
+    )
+    return pd.DataFrame(
+        {"date": rows["date"].to_numpy(), "y": rows["label"].to_numpy(), "p": p}
+    )
+
+
+def calibration_window(args: argparse.Namespace) -> int:
+    """Platt slopes for the production refit fitted on 2023 to 2026 instead of
+    2025 to 2026, and what each does to confidence. Nothing is saved but a
+    JSON record; no slope is adopted here (it cannot be scored on
+    validation)."""
+    version = json.loads((args.eval / "selection.json").read_text())["version"]
+    approved = registry.approved_version(args.models)
+    candidate, _ = registry.load_candidate(args.models, version)
+    production, _ = registry.load_candidate(args.models, approved)
+    lineage = registry.read_manifest(args.models, approved).get("lineage") or {}
+    if lineage.get("parent") != version:
+        raise ValueError(f"{approved} is not a refit of {version}")
+    recipe = candidate.recipe
+    config = _feature_config(args.models, version)
+    conn = connect(args.db)
+    try:
+        data = load_feature_data(conn)
+    finally:
+        conn.close()
+    reason = (
+        f"model revision M4.5: calibration window for the refit of {version} "
+        "(analysis only; nothing saved or adopted)"
+    )
+    _log_test_look(args.models, reason)
+    last = max(b.date for b in data.bouts)
+    valid_start, test_start = SPLIT_DATES.valid_start, SPLIT_DATES.test_start
+
+    # Model fitted through 2022: the candidate itself, on its own table.
+    t2022 = build_features(data, config).frame
+    # Model fitted through 2024: the refit's calibration model (D47).
+    count, _ = tree_count(data, recipe, config, SPLIT_DATES.valid_end, reason)
+    t2024 = build_features(data, replace(config, train_end=SPLIT_DATES.valid_end))
+    splits = Splits(t2024.frame, SplitDates(SPLIT_DATES.valid_end, last))
+    splits.unlock_test(reason)
+    m2024 = fit_fixed(
+        recipe, fit_rows(splits.train()), count.n_trees, SPLIT_DATES.valid_end
+    )
+
+    a = _oot(candidate.model, recipe, t2022, valid_start, SPLIT_DATES.valid_end)
+    b = _oot(candidate.model, recipe, t2022, test_start, last)
+    c = _oot(m2024, recipe, t2024.frame, test_start, last)
+    windows = {
+        "current_2025_2026_from_2024_model": c,
+        "2023_2026_from_2022_model": pd.concat([a, b]),
+        "2023_2026_rolling_2022_then_2024_model": pd.concat([a, c]),
+        "reference_2023_2024_from_2022_model": a,
+    }
+
+    # The production booster's uncalibrated probabilities on 2026 bouts, from
+    # its own feature pipeline. It was fitted on these bouts, so only their
+    # spread is reported, never a score.
+    pipeline = registry.read_json(args.models, approved, "feature_pipeline.json")
+    final = build_features(
+        data,
+        _config_from(pipeline["config"]),
+        FittedParams.from_dict(pipeline["params"]),
+    ).frame
+    recent = labelled(final[final["date"] >= pd.Timestamp(date(last.year, 1, 1))])
+    raw = production.predict(recent, calibrated=False)
+
+    out: dict = {
+        "candidate": version,
+        "production": approved,
+        "production_slope": production.calibrator.slope,
+        "calibration_model_2024_trees": count.n_trees,
+        "spread_on": f"{len(recent)} bouts of {last.year} (in the production booster's training data)",
+        "uncalibrated": spread(raw),
+        "windows": {},
+    }
+    for name, frame in windows.items():
+        cal = fit_calibrator(PLATT, frame["p"].to_numpy(), frame["y"].to_numpy())
+        out["windows"][name] = {
+            "n_bouts": len(frame),
+            "dates": [
+                str(pd.Timestamp(frame["date"].min()).date()),
+                str(pd.Timestamp(frame["date"].max()).date()),
+            ],
+            "slope": cal.slope,
+            "production_spread": spread(cal.apply(raw)),
+            "out_of_time_spread_calibrated": spread(cal.apply(frame["p"].to_numpy())),
+        }
+    _write_json(args.out / "calibration_window.json", out)
+    print(f"Wrote {args.out / 'calibration_window.json'}")
+    for name, row in out["windows"].items():
+        print(
+            f"  {name:42} n={row['n_bouts']:5d} slope={row['slope']:.3f} "
+            f"mean favourite {row['production_spread']['mean_favourite']:.3f}"
+        )
+    return 0
+
+
+def _config_from(raw: Mapping) -> FeatureConfig:
+    raw = dict(raw)
+    raw["train_end"] = date.fromisoformat(raw["train_end"])
+    return FeatureConfig(**raw)
+
+
 # --- command ---------------------------------------------------------------------
 
 
@@ -536,9 +780,8 @@ def _write_json(path: Path, value: object) -> None:
 
 
 def _feature_config(models: Path, version: str) -> FeatureConfig:
-    raw = dict(registry.read_json(models, version, "feature_pipeline.json")["config"])
-    raw["train_end"] = date.fromisoformat(raw["train_end"])
-    return FeatureConfig(**raw)
+    pipeline = registry.read_json(models, version, "feature_pipeline.json")
+    return _config_from(pipeline["config"])
 
 
 def _log_test_look(models: Path, what: str) -> None:
@@ -635,6 +878,8 @@ def run(args: argparse.Namespace) -> int:
     if args.secondary:
         after = bouts[bouts["year"] >= SPLIT_DATES.test_start.year]
         record[SECONDARY] = backtest_summary(after, names)
+    if len(names) > 1:
+        record["adoption"] = adoption(record, valid)
 
     args.out.mkdir(parents=True, exist_ok=True)
     tag = "-".join(names)
@@ -646,6 +891,12 @@ def run(args: argparse.Namespace) -> int:
         f"validation reproduces candidate: {record['validation_reproduces_candidate']}"
     )
     print(f"backtest reproduces saved: {record['backtest_reproduces_saved']}")
+    if "adoption" in record:
+        for name, row in record["adoption"]["variants"].items():
+            print(
+                f"  {name:13} {'passes' if row['passes'] else 'fails'} {row['criteria']}"
+            )
+        print(f"recommended under D54: {record['adoption']['recommended']}")
     return 0
 
 
@@ -669,6 +920,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
     p.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
     p.set_defaults(func=run)
+
+    c = sub.add_parser(
+        "calibration-window", help="(d) Platt slope fitted on 2023-2026 for the refit"
+    )
+    c.add_argument("--db", type=Path, default=DEFAULT_DB)
+    c.add_argument("--models", type=Path, default=registry.DEFAULT_ROOT)
+    c.add_argument("--eval", type=Path, default=Path("data/reports/eval"))
+    c.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    c.set_defaults(func=calibration_window)
     return parser
 
 
