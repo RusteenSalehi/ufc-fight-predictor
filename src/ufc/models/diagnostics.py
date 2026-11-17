@@ -98,6 +98,9 @@ CONTEXT = [
     "b_attr_gap",
     "d_elo",
     "d_age",
+    "d_losses",
+    "lvl_age",
+    "lvl_n_fights",
 ]
 
 REPORTED_RULES = (
@@ -229,6 +232,9 @@ def difficulty(bouts: pd.DataFrame, elo_scale: float = 400.0) -> dict:
             ),
             "abs_age_mean": float(np.nanmean(age[mask])),
             "abs_age_5y_share": float((age[mask][np.isfinite(age[mask])] >= 5).mean()),
+            "mean_age": float(np.nanmean(bouts["lvl_age"].to_numpy()[mask])),
+            "mean_ufc_fights": float(bouts["lvl_n_fights"].to_numpy()[mask].mean()),
+            "abs_losses_mean": float(bouts["d_losses"].abs().to_numpy()[mask].mean()),
             "any_debutant_share": float(debut[mask].mean()),
             "attribute_gap_share": float(one_gap[mask].mean()),
             "confidence_mean": float(conf[mask].mean()),
@@ -276,6 +282,36 @@ def attribution(bouts: pd.DataFrame, variants: Sequence[str]) -> dict:
             },
         }
         out[name] = record
+    return out
+
+
+def era_gap(bouts: pd.DataFrame, n_boot: int = 2000, seed: int = 0) -> dict:
+    """Each earlier era's log loss minus the test period's, for the full
+    model, logistic regression and Elo, with a 95% bootstrap interval. The
+    two sets of bouts are different, so each is resampled on its own."""
+    y = bouts["label"].to_numpy(dtype=np.float64)
+    masks = era_masks(bouts["date"].dt.year.to_numpy())
+    rng = np.random.default_rng(seed)
+    out: dict = {}
+    for model in ("full", "logistic", "elo"):
+        loss = bout_log_loss(bouts[f"p_{model}"].to_numpy(dtype=np.float64), y)
+        inside = loss[masks[INSIDE]]
+        inside_means = inside[
+            rng.integers(0, len(inside), size=(n_boot, len(inside)))
+        ].mean(axis=1)
+        out[model] = {}
+        for label in (BEFORE, *(name for name, _, _ in ERAS[:-1]), "2024"):
+            earlier = loss[masks[label]]
+            means = earlier[
+                rng.integers(0, len(earlier), size=(n_boot, len(earlier)))
+            ].mean(axis=1)
+            low, high = np.quantile(means - inside_means, [0.025, 0.975])
+            out[model][label] = {
+                "n": len(earlier),
+                "difference": float(earlier.mean() - inside.mean()),
+                "low": float(low),
+                "high": float(high),
+            }
     return out
 
 
@@ -408,9 +444,8 @@ def run_fold(
     reason: str,
 ) -> dict:
     """One walk-forward fold on the registered model's schedule, fitted once
-    per variant from the same feature table. Folds before the test period
-    also score the test period with the full model, to tell an easier era
-    from a better-trained model."""
+    per variant from the same feature table. The full model also scores
+    every later year, to tell an easier era from a better-trained model."""
     dates = fold_dates(year)
     build = build_features(data, replace(feature_config, train_end=dates.train_end))
     splits = Splits(build.frame, dates, test_dates=SPLIT_DATES)
@@ -439,16 +474,19 @@ def run_fold(
             train, scored, recipe.spec, logistic_c
         ).items():
             out[f"p_{model}"] = p
+        # Everything dated after this fold's validation period, by year: a
+        # model that never changes, scored on later and later bouts.
+        after = labelled(splits.between(date(year, 1, 1), None, "later years"))
+        p_after = candidate.predict(after)
+        y_after = after["label"].to_numpy(dtype=np.float64)
+        years_after = after["date"].dt.year.to_numpy()
+        later = {
+            str(y): summary(p_after[years_after == y], y_after[years_after == y])
+            for y in sorted(set(years_after.tolist()))
+        }
+        in_test = years_after >= SPLIT_DATES.test_start.year
         if year < SPLIT_DATES.test_start.year:
-            test = labelled(
-                splits.between(SPLIT_DATES.test_start, None, "old model, test period")
-            )
-            later = summary(
-                candidate.predict(test), test["label"].to_numpy(dtype=np.float64)
-            )
-            later["own_year"] = summary(
-                out["p_full"].to_numpy(), scored["label"].to_numpy(dtype=np.float64)
-            )
+            later["test_period"] = summary(p_after[in_test], y_after[in_test])
     return {"bouts": out, "info": info, "later": later}
 
 
@@ -516,8 +554,19 @@ def main(argv: list[str] | None = None) -> int:
         }
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
 
+    # The requested reruns, then every other family removed in turn, to see
+    # which inputs the difference between the periods depends on.
+    pipeline = registry.read_json(args.models, version, "feature_pipeline.json")
+    variants = dict(VARIANTS)
+    for family, names in sorted(pipeline["families"].items()):
+        if family != "physical":
+            variants[f"no_{family}"] = tuple(names)
+    levels = tuple(n for n in candidate.spec.symmetric)
+    if levels:
+        variants["no_level"] = levels
+
     years = [fold["year"] for fold in backtest["folds"]]
-    logger.info("refitting %d folds x %d variants", len(years), len(VARIANTS))
+    logger.info("refitting %d folds x %d variants", len(years), len(variants))
     folds = Parallel(n_jobs=args.jobs)(
         delayed(run_fold)(
             data,
@@ -525,7 +574,7 @@ def main(argv: list[str] | None = None) -> int:
             feature_config,
             config["baseline_logistic_c"],
             year,
-            VARIANTS,
+            variants,
             reason,
         )
         for year in years
@@ -536,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
     record = {
         "version": version,
         "profile_refresh": PROFILE_REFRESH.isoformat(),
-        "variants": {name: list(drop) for name, drop in VARIANTS.items()},
+        "variants": {name: list(drop) for name, drop in variants.items()},
         "reproduces_saved_backtest": reproduces(bouts, backtest),
         "single_feature_rules": {
             "direction_set_through": SPLIT_DATES.train_end.isoformat(),
@@ -547,20 +596,20 @@ def main(argv: list[str] | None = None) -> int:
             ),
         },
         "difficulty": difficulty(bouts),
-        "attribution": attribution(bouts, list(VARIANTS)),
+        "attribution": attribution(bouts, list(variants)),
         "folds": [fold["info"] for fold in folds],
         "profile_capture": profile_capture(bouts, debut_dates(data)),
-        "old_models_on_test_period": {
+        "fixed_models_on_later_years": {
             str(fold["info"]["year"]): {
                 "n_train": fold["info"]["n_train"],
-                "own_year": fold["later"]["own_year"],
-                "test_period": {
-                    k: v for k, v in fold["later"].items() if k != "own_year"
-                },
+                "fitted_through": fold_dates(
+                    fold["info"]["year"]
+                ).train_end.isoformat(),
+                "scored": fold["later"],
             }
             for fold in folds
-            if fold["later"] is not None
         },
+        "era_gap": era_gap(bouts),
         "one_sided_gaps": one_sided_gaps(frame),
         "truncation": truncation_check(
             data, feature_config, [date(2024, 12, 31), date(2025, 11, 21)]
@@ -571,7 +620,8 @@ def main(argv: list[str] | None = None) -> int:
     bouts.to_parquet(args.out / BOUTS_FILE, index=False)
     print(f"Wrote {args.out / OUT_FILE} and {args.out / BOUTS_FILE}")
     print(f"Saved backtest reproduced: {record['reproduces_saved_backtest']}")
-    for name, row in record["attribution"].items():
+    for name in VARIANTS:
+        row = record["attribution"][name]
         print(
             f"  {name:12} {BEFORE}: {row['log_loss'][BEFORE]:.4f}  "
             f"{INSIDE}: {row['log_loss'][INSIDE]:.4f}  shift {row['shift']:+.4f}"
