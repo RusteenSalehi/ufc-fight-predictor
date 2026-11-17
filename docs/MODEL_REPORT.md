@@ -481,12 +481,12 @@ not of the model or of the test boundary: a model fitted through 2016 and never 
 same drop, and so do one-line rules with no model at all. The checks cannot tell a real change in the sport
 from a defect in the source's recent rows that I have not thought of. Closing odds would (see "Not checked").
 
-**One documented assumption turned out to be false, and it matters for live use, not for the leak question.**
-Upstream does refresh profiles: one refresh between 2025-09-30 and 2025-11-14 changed 698 of them (check 6).
-Bouts whose fighters' profiles were edited after the bout do not score better than the rest, so this is not
-where the gap comes from. But most of 2025 was scored with heights, reaches, stances and dates of birth
-that a pipeline running on the day would not have had. 2026, fought after the refresh, has the missing
-values a live run will see, and is the better guide to live performance.
+**One documented assumption turned out to be false, and it was tested directly.** Upstream does refresh
+profiles: one refresh between 2025-09-30 and 2025-11-14 changed 698 of them (check 6), so most of 2025 was
+scored with heights, reaches, stances and dates of birth that upstream did not hold on the day. Giving the
+saved model only the profiles upstream held before the refresh moves its log loss on the 385 bouts of
+January to September 2025 from 0.6161 to 0.6205 (+0.0044, 95% interval -0.0028 to +0.0115). Profile edits
+made after those bouts are therefore worth at most a few thousandths, against a gap of +0.0431.
 
 ### 1. Single-feature rules by year: no leak found; the shift is visible without any model
 
@@ -678,25 +678,31 @@ birth do score well (0.5764), but so does the model that never sees a date of bi
 Elo (0.6564, against 0.6789 overall): those are easier bouts, not bouts that the change made easier. These
 groups are small and differ in who is in them, so this rules out a large effect, not a small one.
 
-**What it does change.** For the bouts of 2025 fought before the refresh, the model was given attributes
-that upstream did not hold on the day: 206 of 622 fighters had no height on 2024-12-11, 258 no reach and 47
-no date of birth, and the fighters first listed during 2025 are on top of that. A live run would have
-treated many of those bouts as attribute-gap bouts, where the model has 0.7251 (test-period table above).
-That is hindsight in what was available, not in who won, and the rules allow it (leakage rule 3 takes
-attributes from current profiles). It does mean the 2025 figure flatters a live pipeline, and the same may
-be true of every backtest year, since this history only says what upstream held from December 2024. The
-2026 figures (0.6261 in the backtest, 0.6316 for the registered model) include the gaps a live run will see.
+**Scored with the profiles upstream held at the time.** No existing profile changed between 2024-12-11 and
+2025-09-30, so the 2025-09-30 file is what upstream held for every bout from January to September 2025 (a
+fighter with no profile in it gets no attributes). The saved model, not refitted, on those 385 bouts:
+
+| profiles | bouts | log loss | accuracy | attribute-gap bouts | age difference missing | height or reach difference missing |
+|---|---:|---:|---:|---:|---:|---:|
+| today's (as in the test evaluation) | 385 | 0.6161 | 67.8% | 0 | 0 | 0 |
+| as upstream held them on 2025-09-30 | 385 | 0.6205 | 66.6% | 208 | 51 | 258 |
+
+The difference is +0.0044 (95% paired interval -0.0028 to +0.0115). With profiles that cannot contain
+anything from after the bouts, and with 208 of the 385 turned into attribute-gap bouts, the model scores
+about the same. This is the direct test of "profiles are as-of-today data": for these nine months the
+as-of-today part is worth 0.004 at most, and it includes honest loss of information, not only hindsight.
+It also says a live run in 2025 would have scored close to the reported figure. Two limits: the comparison
+covers 2025 only up to the refresh, and the model itself was still fitted on today's profiles for bouts
+through 2022; what upstream held in those years is not known from this history.
 
 ### Not checked
 
 - **Closing odds.** If bookmakers' favourites also won more often from 2024, the change is in the sport;
   if not, it is in this data. Historical odds are not sourced yet (baseline 3 in ML_REQUIREMENTS). This is
   the check most likely to settle the question.
-- **What a live run would have scored in 2025.** Check 6 shows profiles were more complete in the table
-  than on the day. Rebuilding each 2025 bout's features from the upstream commit current on its date, and
-  scoring that, would measure it. Not done: it is a new feature build, and it was out of time.
-- **Profile history before December 2024.** Whether earlier refreshes happened, and so how much hindsight
-  the backtest years carry, was not looked at. Upstream's history goes back further.
+- **Profile history before December 2024.** Whether earlier refreshes happened, and so whether the
+  training and backtest years were fitted and scored with profiles more complete than upstream held at the
+  time, was not looked at. Upstream's history goes back further. Check 6 covers January to September 2025.
 - **A change in how the source records recent bouts** (stat definitions, corrections applied only to recent
   events). Nothing above would catch it.
 - **Why 2024.** Older, more experienced rosters and wider age gaps are described in check 2, not shown to be

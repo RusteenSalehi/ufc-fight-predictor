@@ -25,11 +25,17 @@ import sqlite3
 import sys
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from ufc.db.connection import connect
+from ufc.features.build import build_features
+from ufc.features.config import FeatureConfig
+from ufc.features.data import FighterAttrs, load_feature_data
 from ufc.ingest import source
 from ufc.ingest.fetch import (
     PAUSE_BETWEEN_REQUESTS_S,
@@ -45,7 +51,10 @@ from ufc.ingest.parsing import (
     parse_reach_cm,
     parse_stance,
 )
-from ufc.models.diagnostics import group_summaries
+from ufc.models import registry
+from ufc.models.diagnostics import LEDGER_FILE, group_summaries
+from ufc.models.metrics import bootstrap_mean_interval, bout_log_loss, summary
+from ufc.models.splits import Splits, attribute_gap, labelled
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +211,69 @@ def dob_changes(old: Profiles, new: Profiles) -> dict:
     }
 
 
+def as_available(
+    capture: Profiles,
+    captured: str,
+    args: argparse.Namespace,
+) -> dict:
+    """Score the saved candidate on test-period bouts fought before
+    ``captured``, twice: with today's profiles and with the profiles upstream
+    held in that capture. Nothing is refitted; only the inputs differ. A
+    fighter with no profile in the capture gets no attributes."""
+    version = json.loads((args.eval / "selection.json").read_text())["version"]
+    candidate, _ = registry.load_candidate(args.models, version)
+    raw = registry.read_json(args.models, version, "feature_pipeline.json")["config"]
+    config = FeatureConfig(**{**raw, "train_end": date.fromisoformat(raw["train_end"])})
+    conn = connect(args.db)
+    try:
+        data = load_feature_data(conn)
+    finally:
+        conn.close()
+    then = {
+        fighter: FighterAttrs(fighter, **capture[fighter])
+        if fighter in capture
+        else FighterAttrs(fighter)
+        for fighter in data.fighters
+    }
+    reason = f"era-shift diagnostic of {version} (analysis only): profiles as available"
+    with (args.models / LEDGER_FILE).open("a", encoding="utf-8") as handle:
+        entry = {
+            "what": reason,
+            "run_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    start, end = date.fromisoformat(args.test_start), date.fromisoformat(captured[:10])
+    out: dict = {
+        "capture": captured,
+        "from": start.isoformat(),
+        "before": end.isoformat(),
+    }
+    losses: dict[str, pd.Series] = {}
+    for label, fighters in (("profiles_today", data.fighters), ("profiles_then", then)):
+        splits = Splits(build_features(replace(data, fighters=fighters), config).frame)
+        splits.unlock_test(reason)
+        rows = labelled(splits.between(start, end - timedelta(days=1), "as available"))
+        y = rows["label"].to_numpy(dtype=np.float64)
+        gap = attribute_gap(rows).to_numpy()
+        p = candidate.predict(rows)
+        losses[label] = pd.Series(bout_log_loss(p, y), index=rows["bout_id"].to_numpy())
+        out[label] = {
+            "model": summary(p, y),
+            "n_attribute_gap": int(gap.sum()),
+            "n_age_missing": int(rows["d_age"].isna().sum()),
+            "n_height_or_reach_missing": int(
+                (rows["d_height_cm"].isna() | rows["d_reach_cm"].isna()).sum()
+            ),
+            "model_no_attribute_gap": summary(p[~gap], y[~gap]),
+            "model_attribute_gap": summary(p[gap], y[gap]) if gap.any() else None,
+        }
+    today = losses["profiles_today"]
+    out["then_minus_today"] = bootstrap_mean_interval(
+        (losses["profiles_then"].loc[today.index] - today).to_numpy()
+    )
+    return out
+
+
 def commit_before(session, repo: str, when: str) -> tuple[str, str]:
     """The last commit that touched the profile file before ``when``."""
     url = COMMITS_URL.format(
@@ -252,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", type=Path, default=Path("data/ufc.db"))
     parser.add_argument("--before", nargs="+", default=list(DEFAULT_BEFORE))
     parser.add_argument("--test-start", default="2025-01-01")
+    parser.add_argument("--models", type=Path, default=registry.DEFAULT_ROOT)
+    parser.add_argument("--eval", type=Path, default=Path("data/reports/eval"))
     parser.add_argument(
         "--bouts",
         type=Path,
@@ -321,6 +395,10 @@ def main(argv: list[str] | None = None) -> int:
             args.test_start,
             max(differing)[:10],
         )
+        # Profiles as upstream held them through most of 2025: the last
+        # capture before the refresh.
+        last = next(c for c in captures if c[1] == max(differing))
+        record["as_available"] = as_available(last[2], last[1], args)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
     print(f"Wrote {args.out}")
