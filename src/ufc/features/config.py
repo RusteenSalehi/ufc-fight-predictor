@@ -1,4 +1,8 @@
-"""Settings for the feature pipeline. Nothing in this file is fitted to data."""
+"""Settings for the feature pipeline. Nothing in this file is fitted to data.
+
+One setting, ``shrink_minutes``, is chosen on validation by the model
+pipeline (``python -m ufc.models train``); its default here is "off".
+"""
 
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ WINDOWS: tuple[str, ...] = ("career", "l3", "l5", "decay")
 
 @dataclass(frozen=True, slots=True)
 class FeatureConfig:
-    """Choices made in advance, not tuned on outcomes.
+    """Choices made in advance, not tuned on outcomes, except ``shrink_minutes``.
 
     ``decay_half_life_days``: a bout this many days before the cutoff counts
     half as much as one on the cutoff in the ``decay`` versions of a stat.
@@ -31,12 +35,23 @@ class FeatureConfig:
     baselines of opponents with one or two other bouts from being extreme.
 
     ``recent_days``: the window for "fights in the last two years".
+
+    ``shrink_minutes``: prior strength, in cage minutes, for per-minute and
+    per-15-minute rates. A rate becomes (count + m * class mean per minute) /
+    (minutes + m), which pulls a fighter with little cage time toward the
+    average of the weight class. 0 leaves rates as plain pooled rates. The
+    model pipeline chooses the value on validation (docs/DECISIONS.md, D33).
     """
 
     train_end: date = TRAIN_END
     decay_half_life_days: float = 730.0
     prior_fights: float = 2.0
     recent_days: int = 730
+    shrink_minutes: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.shrink_minutes < 0:
+            raise ValueError("shrink_minutes cannot be negative")
 
 
 _WEIGHT_LIMIT_LBS: dict[str, float] = {

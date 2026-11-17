@@ -1,10 +1,15 @@
 """Features for one bout: fighter A against fighter B at a date.
 
-Every model feature is antisymmetric. It is either ``f(A) - f(B)`` for a
+Every ``d_`` feature is antisymmetric. It is either ``f(A) - f(B)`` for a
 per-fighter value ``f``, or ``m(A, B) - m(B, A)`` for a pair value ``m`` such
 as "A's takedown volume against B's takedown defense". Swapping the fighters
 therefore negates every feature exactly, and which fighter the source happened
 to list first carries no information (docs/ML_REQUIREMENTS.md, "Symmetry").
+
+A few ``lvl_`` columns are the opposite: the mean of the two fighters' values,
+which swapping leaves exactly unchanged. They say what kind of bout it is (two
+veterans or two newcomers) and nothing about who is who. They are candidates:
+a model uses them only if they help on validation (docs/DECISIONS.md, D34).
 
 The same function serves the historical build and a hypothetical upcoming
 bout, so training and prediction features cannot drift apart.
@@ -35,6 +40,7 @@ FAMILIES: tuple[str, ...] = (
     "style_matchup",
     "debut",
     "cardio",
+    "rating",
 )
 
 
@@ -93,6 +99,32 @@ FLAG_NAMES: tuple[str, ...] = ("a_debut", "b_debut", "a_no_stats", "b_no_stats")
 assert {f.family for f in FEATURES} == set(FAMILIES)
 
 
+class Level(NamedTuple):
+    """The mean of the two fighters' ``source`` values."""
+
+    name: str
+    source: str
+
+
+LEVELS: tuple[Level, ...] = (
+    Level("lvl_age", "age"),
+    Level("lvl_n_fights", "n_fights"),
+    Level("lvl_elo", "elo"),
+)
+LEVEL_NAMES: tuple[str, ...] = tuple(level.name for level in LEVELS)
+"""Swap-invariant columns, written after the ``d_`` features. Not part of
+``FEATURES`` or of any family; a model opts in to them by name."""
+
+_LEVEL_IDX = np.array([POS[level.source] for level in LEVELS])
+
+
+class MatchupArrays(NamedTuple):
+    a: np.ndarray  # fighter A's own values, in FIGHTER_FEATURES order
+    b: np.ndarray
+    features: np.ndarray  # FEATURES order; negated when the fighters swap
+    levels: np.ndarray  # LEVELS order; unchanged when the fighters swap
+
+
 def _pair_values(offense: np.ndarray, defense: np.ndarray) -> np.ndarray:
     against = defense[_DEFENSE_IDX]
     return offense[_OFFENSE_IDX] * np.where(_COMPLEMENT, 1.0 - against, against)
@@ -104,8 +136,8 @@ def matchup_arrays(
     fighter_b_id: str,
     ordinal: int,
     weight_class: str | None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Both fighters' vectors and the feature vector, in ``FEATURES`` order."""
+) -> MatchupArrays:
+    """Both fighters' vectors, the feature vector and the level values."""
     if fighter_a_id == fighter_b_id:
         raise ValueError("a bout needs two different fighters")
     a = fighter_vector(store, fighter_a_id, ordinal, weight_class)
@@ -113,7 +145,10 @@ def matchup_arrays(
     features = np.concatenate(
         (a[_DIFF_IDX] - b[_DIFF_IDX], _pair_values(a, b) - _pair_values(b, a))
     )
-    return a, b, features
+    # a + b and b + a are the same floating-point number, so this is exactly
+    # the same whichever fighter is listed first.
+    levels = (a[_LEVEL_IDX] + b[_LEVEL_IDX]) / 2.0
+    return MatchupArrays(a, b, features, levels)
 
 
 def flags_from(a: np.ndarray, b: np.ndarray) -> tuple[bool, bool, bool, bool]:
@@ -126,8 +161,9 @@ def flags_from(a: np.ndarray, b: np.ndarray) -> tuple[bool, bool, bool, bool]:
 class Matchup:
     """Features for one bout, with the per-fighter values they came from.
 
-    ``features`` is what a model consumes. ``a`` and ``b`` hold each fighter's
-    own as-of values (for display and explanation).
+    ``features`` and, if the model uses them, ``levels`` are what a model
+    consumes. ``a`` and ``b`` hold each fighter's own as-of values (for
+    display and explanation).
     """
 
     fighter_a_id: str
@@ -135,6 +171,7 @@ class Matchup:
     date: date
     weight_class: str | None
     features: dict[str, float]
+    levels: dict[str, float]
     flags: dict[str, bool]
     a: dict[str, float]
     b: dict[str, float]
@@ -154,7 +191,7 @@ def build_matchup(
     profile has unknown physical attributes. Without ``weight_class`` the
     weight-change features are NaN.
     """
-    a, b, features = matchup_arrays(
+    a, b, features, levels = matchup_arrays(
         store, fighter_a_id, fighter_b_id, on.toordinal(), weight_class
     )
     names = [f.name for f in FIGHTER_FEATURES]
@@ -164,6 +201,7 @@ def build_matchup(
         date=on,
         weight_class=weight_class,
         features=dict(zip(FEATURE_NAMES, features.tolist(), strict=True)),
+        levels=dict(zip(LEVEL_NAMES, levels.tolist(), strict=True)),
         flags=dict(zip(FLAG_NAMES, flags_from(a, b), strict=True)),
         a=dict(zip(names, a.tolist(), strict=True)),
         b=dict(zip(names, b.tolist(), strict=True)),

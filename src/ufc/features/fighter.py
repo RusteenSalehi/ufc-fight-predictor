@@ -8,6 +8,11 @@ Rates are pooled: total landed over total attempted, total strikes over total
 minutes. A rate with a zero denominator is NaN, which is how a debut, a
 history without recorded stats, or a fighter who never faced a takedown
 attempt shows up. Record counts (bouts, wins) are true zeros for a debutant.
+
+With ``FeatureConfig.shrink_minutes`` set, rates per minute and per 15
+minutes are shrunk toward the average of the bout's weight class
+(``shrink.py``). A fighter with no recorded stat time still has NaN: the
+prior is never used as a stand-in for a history that does not exist.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ import numpy as np
 from ufc.features.adjust import ADJUSTED_NAMES, adjusted_stats
 from ufc.features.components import IDX
 from ufc.features.config import WINDOWS, weight_limit_lbs
+from ufc.features.shrink import RATE_COMPONENTS
 from ufc.features.store import FeatureStore, FighterHistory
 
 NAN = float("nan")
@@ -108,7 +114,7 @@ SCALARS: tuple[tuple[str, str], ...] = (
     ("moved_up", "weight_change"),
     ("moved_down", "weight_change"),
     ("fights_at_weight", "weight_change"),
-    ("elo", "opponent_quality"),
+    ("elo", "rating"),
     ("debut", "debut"),
     ("cardio_slpm_ratio_career", "cardio"),
     ("cardio_slpm_ratio_decay", "cardio"),
@@ -156,6 +162,9 @@ def _spec_arrays(specs: tuple[Ratio, ...]) -> tuple[np.ndarray, ...]:
 
 
 _W_NUM, _W_DEN, _W_SCALE, _W_COMPLEMENT = _spec_arrays(WINDOWED)
+# Rates over stat time: the ones that shrinkage applies to.
+_W_TIME_RATE = np.array([s.den == "t" for s in WINDOWED])
+assert {s.num for s in WINDOWED if s.den == "t"} <= set(RATE_COMPONENTS)
 _C_NUM, _C_DEN, _C_SCALE, _C_COMPLEMENT = _spec_arrays(CAREER)
 _COUNT_IDX = np.array([IDX[c.component] for c in COUNTS])
 _COUNT_SCALE = np.array([c.scale for c in COUNTS])
@@ -259,7 +268,18 @@ def fighter_vector(
     decay = sums[3]
 
     out = np.full(len(FIGHTER_FEATURES), np.nan)
-    out[_SL_WINDOWED] = _ratios(sums, _W_NUM, _W_DEN, _W_SCALE, _W_COMPLEMENT).ravel()
+    windowed = _ratios(sums, _W_NUM, _W_DEN, _W_SCALE, _W_COMPLEMENT)
+    prior = store.shrink_prior(weight_class)
+    if prior is not None:
+        # The prior counts as minutes fought at the cutoff, so in the decayed
+        # window it carries the weight of a bout held on the cutoff date.
+        strength = np.array([1.0, 1.0, 1.0, store.decay_weight(ordinal)])
+        shrunk = _ratios(
+            sums + strength[:, None] * prior, _W_NUM, _W_DEN, _W_SCALE, _W_COMPLEMENT
+        )
+        observed = sums[:, _W_DEN] > 0  # no stat time stays NaN
+        windowed = np.where(_W_TIME_RATE & observed, shrunk, windowed)
+    out[_SL_WINDOWED] = windowed.ravel()
     out[_SL_CAREER] = _ratios(career, _C_NUM, _C_DEN, _C_SCALE, _C_COMPLEMENT)
     out[_SL_COUNTS] = career[_COUNT_IDX] * _COUNT_SCALE
 

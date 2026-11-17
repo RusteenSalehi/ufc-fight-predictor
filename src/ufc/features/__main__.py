@@ -17,11 +17,13 @@ import pandas as pd
 from ufc.db.connection import connect
 from ufc.features.build import (
     FEATURES_FILE,
+    LEVEL_FAMILY,
     META_FILE,
     build_features,
     feature_summary,
     write_features,
 )
+from ufc.features.config import FeatureConfig
 from ufc.features.data import load_feature_data
 from ufc.features.matchup import FAMILIES, FEATURES
 
@@ -37,6 +39,14 @@ def build_parser() -> argparse.ArgumentParser:
     build = commands.add_parser("build", help="build data/features/features.parquet")
     build.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     build.add_argument("--out", type=Path, default=DEFAULT_OUT_DIR)
+    build.add_argument(
+        "--shrink-minutes",
+        type=float,
+        default=0.0,
+        help="prior strength for per-minute rates, in cage minutes (0 = off); "
+        "`python -m ufc.models train` chooses it on validation and writes the "
+        "feature file with the chosen value",
+    )
     summary = commands.add_parser(
         "summary", help="list every feature with its missing-value counts"
     )
@@ -44,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_build(db_path: Path, out_dir: Path) -> int:
+def run_build(db_path: Path, out_dir: Path, shrink_minutes: float = 0.0) -> int:
     if not db_path.exists():
         print(f"No database at {db_path}; run the ingest load first.", file=sys.stderr)
         return 1
@@ -56,7 +66,7 @@ def run_build(db_path: Path, out_dir: Path) -> int:
     if not data.bouts:
         print("The database has no completed bouts.", file=sys.stderr)
         return 1
-    build = build_features(data)
+    build = build_features(data, FeatureConfig(shrink_minutes=shrink_minutes))
     features_path, meta_path = write_features(build, out_dir, data.source_commit)
     frame = build.frame
     print(f"Snapshot commit: {data.source_commit}")
@@ -65,6 +75,7 @@ def run_build(db_path: Path, out_dir: Path) -> int:
         f"{int(frame['label'].notna().sum())} with a winner"
     )
     print(f"Features: {len(FEATURES)} in {features_path}")
+    print(f"Rate shrinkage: {build.store.config.shrink_minutes:g} cage minutes")
     print(
         f"Elo parameters (fit through {build.store.config.train_end}): {build.params.elo}"
     )
@@ -96,7 +107,7 @@ def run_summary(out_dir: Path) -> int:
         f"{len(frame)} bouts, {established} with no debutant, {len(summary)} features. "
         "Columns: missing in all bouts / missing where neither fighter is a debutant."
     )
-    for family in FAMILIES:
+    for family in (*FAMILIES, LEVEL_FAMILY):
         rows = summary[summary["family"] == family]
         print(f"\n{family} ({len(rows)})")
         for row in rows.itertuples():
@@ -110,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = build_parser().parse_args(argv)
     if args.command == "build":
-        return run_build(args.db, args.out)
+        return run_build(args.db, args.out, args.shrink_minutes)
     return run_summary(args.out)
 
 

@@ -26,9 +26,11 @@ from ufc.features.matchup import (
     FEATURE_NAMES,
     FEATURES,
     FLAG_NAMES,
+    LEVEL_NAMES,
     flags_from,
     matchup_arrays,
 )
+from ufc.features.shrink import fit_rate_priors
 from ufc.features.store import FeatureStore, FittedParams
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,10 @@ CONTEXT_COLUMNS: tuple[str, ...] = (
 ``label`` is 1 if fighter A won, 0 if fighter B won, NaN for a draw or no
 contest. ``result`` and ``label`` are outcomes and must never be model inputs."""
 
+LEVEL_FAMILY = "level"
+"""Label for the swap-invariant candidate columns in summaries. It is not one
+of the numbered feature families."""
+
 FEATURES_FILE = "features.parquet"
 META_FILE = "features_meta.json"
 
@@ -68,7 +74,10 @@ def fit_params(
     """Fit everything that is fitted, on bouts through ``config.train_end``."""
     elo_fit = fit_elo_params(bouts, config.train_end)
     league = fit_league_baseline(bouts, config.train_end)
-    return FittedParams(elo=elo_fit.params, league=league), elo_fit
+    rate_priors = fit_rate_priors(bouts, config.train_end)
+    return FittedParams(
+        elo=elo_fit.params, league=league, rate_priors=rate_priors
+    ), elo_fit
 
 
 def _label(bout: BoutFacts) -> float:
@@ -98,11 +107,12 @@ def build_features(
     context: list[tuple] = []
     flags: list[tuple] = []
     values: list[np.ndarray] = []
+    levels: list[np.ndarray] = []
     for day, day_bouts in by_date(bouts):
         ordinal = day.toordinal()
         # Phase 1: features for this date, from earlier dates only.
         for bout in day_bouts:
-            a, b, features = matchup_arrays(
+            a, b, features, level_values = matchup_arrays(
                 store, bout.fighter_a_id, bout.fighter_b_id, ordinal, bout.weight_class
             )
             context.append(
@@ -122,6 +132,7 @@ def build_features(
             )
             flags.append(flags_from(a, b))
             values.append(features)
+            levels.append(level_values)
         # Phase 2: only now does this date become history.
         store.commit_date(day, day_bouts)
 
@@ -137,7 +148,11 @@ def build_features(
         np.array(values).reshape(len(values), len(FEATURE_NAMES)),
         columns=list(FEATURE_NAMES),
     )
-    frame = pd.concat([frame, flag_frame, feature_frame], axis=1)
+    level_frame = pd.DataFrame(
+        np.array(levels).reshape(len(levels), len(LEVEL_NAMES)),
+        columns=list(LEVEL_NAMES),
+    )
+    frame = pd.concat([frame, flag_frame, feature_frame, level_frame], axis=1)
     return FeatureBuild(frame=frame, store=store, params=params, elo_fit=elo_fit)
 
 
@@ -145,7 +160,8 @@ def mirror(frame: pd.DataFrame) -> pd.DataFrame:
     """The same bouts with fighters A and B swapped.
 
     Difference features change sign, per-fighter flags and IDs trade places,
-    and the label flips. Training uses both orientations of every bout.
+    and the label flips. Level columns (means of the two fighters) stay as
+    they are. Training uses both orientations of every bout.
     """
     swapped = frame.copy()
     swapped["fighter_a_id"] = frame["fighter_b_id"]
@@ -165,13 +181,15 @@ def feature_summary(frame: pd.DataFrame) -> pd.DataFrame:
     his debut, where a missing value is not explained by the debut flag.
     """
     established = ~(frame["a_debut"] | frame["b_debut"])
+    columns = [(f.name, f.family) for f in FEATURES]
+    columns += [(name, LEVEL_FAMILY) for name in LEVEL_NAMES]
     return pd.DataFrame(
         {
-            "feature": [f.name for f in FEATURES],
-            "family": [f.family for f in FEATURES],
-            "missing": [int(frame[f.name].isna().sum()) for f in FEATURES],
+            "feature": [name for name, _ in columns],
+            "family": [family for _, family in columns],
+            "missing": [int(frame[name].isna().sum()) for name, _ in columns],
             "missing_established": [
-                int(frame.loc[established, f.name].isna().sum()) for f in FEATURES
+                int(frame.loc[established, name].isna().sum()) for name, _ in columns
             ],
         }
     )
@@ -196,6 +214,7 @@ def build_meta(build: FeatureBuild, source_commit: str | None) -> dict:
             family: [f.name for f in FEATURES if f.family == family]
             for family in FAMILIES
         },
+        "level_features": list(LEVEL_NAMES),
     }
     if build.elo_fit is not None:
         fit = build.elo_fit

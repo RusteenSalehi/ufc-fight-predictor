@@ -20,7 +20,14 @@ from tests.feature_helpers import (
     swap_corners,
 )
 from ufc.features.build import CONTEXT_COLUMNS, build_features, mirror
-from ufc.features.matchup import FEATURE_NAMES, FEATURES, FLAG_NAMES, build_matchup
+from ufc.features.config import FeatureConfig
+from ufc.features.matchup import (
+    FEATURE_NAMES,
+    FEATURES,
+    FLAG_NAMES,
+    LEVEL_NAMES,
+    build_matchup,
+)
 
 D0 = date(2020, 1, 1)
 
@@ -30,9 +37,9 @@ def data():
     return random_league(seed=11).data()
 
 
-@pytest.fixture(scope="module")
-def built(data):
-    return build_features(data)
+@pytest.fixture(scope="module", params=[0.0, 12.0], ids=["plain", "shrunk"])
+def built(data, request):
+    return build_features(data, FeatureConfig(shrink_minutes=request.param))
 
 
 def test_swapping_fighters_negates_every_difference_feature_exactly(built):
@@ -49,6 +56,11 @@ def test_swapping_fighters_negates_every_difference_feature_exactly(built):
         backward = np.array([ba.features[n] for n in FEATURE_NAMES])
         # Exact equality; NaN matches NaN.
         np.testing.assert_array_equal(forward, -backward)
+        # Level columns are means of the two fighters: exactly unchanged.
+        np.testing.assert_array_equal(
+            np.array([ab.levels[n] for n in LEVEL_NAMES]),
+            np.array([ba.levels[n] for n in LEVEL_NAMES]),
+        )
         # Each fighter's own values do not depend on which side he is on.
         assert _same_values(ab.a, ba.b) and _same_values(ab.b, ba.a)
         assert (ab.flags["a_debut"], ab.flags["a_no_stats"]) == (
@@ -71,7 +83,9 @@ def test_listing_order_in_the_source_does_not_matter(data, built):
     """Rebuild with every bout's fighters listed the other way round: the
     result is the mirror image, and nothing else changes."""
     swapped = build_features(
-        replace(data, bouts=[swap_corners(b) for b in data.bouts]), params=built.params
+        replace(data, bouts=[swap_corners(b) for b in data.bouts]),
+        built.store.config,
+        built.params,
     )
     pd.testing.assert_frame_equal(swapped.frame, mirror(built.frame), check_exact=True)
 
@@ -84,6 +98,10 @@ def test_mirror_swaps_flags_and_labels_and_is_its_own_inverse(built):
     labelled = frame["label"].notna()
     assert (mirrored.loc[labelled, "label"] == 1 - frame.loc[labelled, "label"]).all()
     assert mirrored.loc[~labelled, "label"].isna().all()
+    pd.testing.assert_frame_equal(
+        mirrored[list(LEVEL_NAMES)], frame[list(LEVEL_NAMES)], check_exact=True
+    )
+    assert mirrored[list(FEATURE_NAMES)].equals(-frame[list(FEATURE_NAMES)])
     pd.testing.assert_frame_equal(mirror(mirrored), frame, check_exact=True)
 
 
@@ -93,6 +111,28 @@ def test_every_model_feature_is_a_difference_and_none_is_an_outcome():
     assert not {"label", "result"} & (set(FEATURE_NAMES) | set(FLAG_NAMES))
     assert {"label", "result"} <= set(CONTEXT_COLUMNS)
     assert not any("corner" in f.name or f.family == "aux" for f in FEATURES)
+    # Swap-invariant columns are kept apart from the antisymmetric features.
+    assert all(name.startswith("lvl_") for name in LEVEL_NAMES)
+    assert not set(LEVEL_NAMES) & set(FEATURE_NAMES)
+
+
+def test_level_columns_are_the_mean_of_the_two_fighters():
+    league = League()
+    old = league.fighter(dob=date(1980, 1, 1))
+    young = league.fighter(dob=date(1995, 1, 1))
+    ageless = league.fighter(dob=None)
+    league.bout(league.event(D0), old, young)
+    league.bout(league.event(D0 + timedelta(days=30)), old, ageless)
+    store = build_features(league.data(), NO_PRIOR, plain_params()).store
+    on = D0 + timedelta(days=60)
+
+    matchup = build_matchup(store, old, young, on)
+    assert matchup.levels["lvl_age"] == (matchup.a["age"] + matchup.b["age"]) / 2
+    assert matchup.levels["lvl_n_fights"] == (2 + 1) / 2
+    assert matchup.levels["lvl_elo"] == (matchup.a["elo"] + matchup.b["elo"]) / 2
+    assert matchup.levels == build_matchup(store, young, old, on).levels
+    # A missing value on either side leaves the mean missing, not halved.
+    assert np.isnan(build_matchup(store, old, ageless, on).levels["lvl_age"])
 
 
 def test_style_matchups_are_offense_against_defense():

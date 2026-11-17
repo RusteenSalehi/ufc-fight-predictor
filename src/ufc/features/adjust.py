@@ -6,7 +6,9 @@ his bouts against F removed, shrunk toward the league average. The baseline
 says what O's other opponents typically managed against him, for example
 that they land 40% of their takedown attempts. Multiplied by what F actually
 attempted in the bout, it gives an expected count. The adjusted stat is
-(actual - expected) / exposure over F's history.
+(actual - expected) / exposure over F's history. With shrinkage on, the
+per-minute stats have ``shrink_minutes`` added to the exposure, which pulls
+them toward zero: the value of a fighter who did exactly what was expected.
 
 Both sides respect the cutoff: F's bouts and O's bouts are all strictly
 before D (docs/DECISIONS.md, D25).
@@ -83,6 +85,7 @@ _DEN = np.array([IDX[s.den] for s in ADJUSTED])
 _MIRROR_NUM = np.array([IDX[_mirror(s.num)] for s in ADJUSTED])
 _MIRROR_DEN = np.array([IDX[_mirror(s.den)] for s in ADJUSTED])
 _FACTOR = np.array([s.scale * s.sign for s in ADJUSTED])
+_TIME_RATE = np.array([s.den == "t" for s in ADJUSTED])
 _T = IDX["t"]
 
 
@@ -135,8 +138,15 @@ def adjusted_stats(
     expected = np.where(exposure > 0, rate * exposure, 0.0)
     actual = own[:, _NUM]
 
+    # Shrinkage (shrink.py): the per-minute stats get the same number of
+    # extra minutes as the plain rates. Over those minutes actual equals
+    # expected, so only the denominator grows and the stat moves toward zero.
+    extra_s = 60.0 * store.config.shrink_minutes
+    prior_weight = (1.0, store.decay_weight(ordinal))
     for k, w in enumerate((np.ones(len(stat_bouts)), weights)):
         den = w @ exposure
+        if extra_s > 0:
+            den = den + np.where(_TIME_RATE & (den > 0), extra_s * prior_weight[k], 0.0)
         values = np.full(n, np.nan)
         np.divide(w @ actual - w @ expected, den, out=values, where=den > 0)
         out[k * n : (k + 1) * n] = values * _FACTOR

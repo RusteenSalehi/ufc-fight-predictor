@@ -25,31 +25,38 @@ from ufc.features.components import (
 from ufc.features.config import DECAY_ORIGIN, FeatureConfig
 from ufc.features.data import BoutFacts, FighterAttrs
 from ufc.features.elo import EloParams, EloTracker
+from ufc.features.shrink import RatePriors
 
 
 @dataclass(frozen=True, slots=True)
 class FittedParams:
     """Everything in the pipeline that is fitted to data.
 
-    Both parts are fitted on the training period only (leakage rule 4).
+    Every part is fitted on the training period only (leakage rule 4).
     ``league`` is the average component vector of one fighter in one bout
-    with stats; it is the prior for opponent baselines.
+    with stats; it is the prior for opponent baselines. ``rate_priors`` holds
+    the weight-class average rates that per-minute rates are shrunk toward;
+    it is only needed when ``FeatureConfig.shrink_minutes`` is positive.
     """
 
     elo: EloParams
     league: np.ndarray
+    rate_priors: RatePriors | None = None
 
     def to_dict(self) -> dict:
         return {
             "elo": self.elo.to_dict(),
             "league": dict(zip(COMPONENTS, self.league.tolist(), strict=True)),
+            "rate_priors": self.rate_priors.to_dict() if self.rate_priors else None,
         }
 
     @classmethod
     def from_dict(cls, raw: Mapping) -> FittedParams:
+        priors = raw.get("rate_priors")
         return cls(
             elo=EloParams(**raw["elo"]),
             league=np.array([raw["league"][name] for name in COMPONENTS], dtype=float),
+            rate_priors=RatePriors.from_dict(priors) if priors else None,
         )
 
 
@@ -127,6 +134,8 @@ class FeatureStore:
         self.elo = EloTracker(params.elo)
         self._histories: dict[str, FighterHistory] = {}
         self._prior = config.prior_fights * params.league
+        if config.shrink_minutes > 0 and params.rate_priors is None:
+            raise ValueError("shrink_minutes is set but no rate priors were fitted")
         self.last_date: date | None = None
 
     def history(self, fighter_id: str) -> FighterHistory:
@@ -138,6 +147,14 @@ class FeatureStore:
 
     def decay_weight(self, ordinal: int) -> float:
         return 2.0 ** ((ordinal - DECAY_ORIGIN) / self.config.decay_half_life_days)
+
+    def shrink_prior(self, weight_class: str | None) -> np.ndarray | None:
+        """``shrink_minutes`` average minutes of ``weight_class`` as a
+        component vector, or ``None`` when shrinkage is off."""
+        minutes = self.config.shrink_minutes
+        if minutes <= 0 or self.params.rate_priors is None:
+            return None
+        return minutes * self.params.rate_priors.for_class(weight_class)
 
     def commit_date(self, day: date, bouts: Iterable[BoutFacts]) -> None:
         """Add every bout of one date. Dates must arrive in increasing order."""

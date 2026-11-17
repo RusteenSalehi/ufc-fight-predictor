@@ -20,7 +20,7 @@ from tests.feature_helpers import (
 )
 from ufc.features.build import build_features, fit_params
 from ufc.features.config import FeatureConfig
-from ufc.features.matchup import FEATURE_NAMES, FLAG_NAMES, build_matchup
+from ufc.features.matchup import FEATURE_NAMES, FLAG_NAMES, LEVEL_NAMES, build_matchup
 from ufc.features.store import FeatureStore
 
 NOBODY = "0" * 16
@@ -31,10 +31,14 @@ def data():
     return random_league().data()
 
 
-@pytest.fixture(scope="module")
-def config(data):
-    """Training ends about 60% of the way through the league's history."""
-    return FeatureConfig(train_end=data.bouts[int(len(data.bouts) * 0.6)].date)
+@pytest.fixture(scope="module", params=[0.0, 12.0], ids=["plain", "shrunk"])
+def config(data, request):
+    """Training ends about 60% of the way through the league's history. Every
+    test runs with rate shrinkage off and on."""
+    return FeatureConfig(
+        train_end=data.bouts[int(len(data.bouts) * 0.6)].date,
+        shrink_minutes=request.param,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -140,6 +144,7 @@ def test_perturbation_with_fitting_included(data, config, built, params):
     changed = build_features(changed_data, config)  # fits its own parameters
     assert changed.params.elo == params.elo
     np.testing.assert_array_equal(changed.params.league, params.league)
+    assert changed.params.rate_priors.to_dict() == params.rate_priors.to_dict()
     pd.testing.assert_frame_equal(
         rows_through(changed.frame, config.train_end),
         rows_through(built.frame, config.train_end),
@@ -149,6 +154,7 @@ def test_perturbation_with_fitting_included(data, config, built, params):
     truncated = build_features(without_bouts_after(data, config.train_end), config)
     assert truncated.params.elo == params.elo
     np.testing.assert_array_equal(truncated.params.league, params.league)
+    assert truncated.params.rate_priors.to_dict() == params.rate_priors.to_dict()
 
 
 def _same_event_dates(data) -> list[date]:
@@ -225,6 +231,10 @@ def test_batch_rows_equal_the_as_of_function_on_the_finished_store(data, built):
         np.testing.assert_array_equal(
             np.array([matchup.features[n] for n in FEATURE_NAMES]),
             np.array([getattr(row, n) for n in FEATURE_NAMES]),
+        )
+        np.testing.assert_array_equal(
+            np.array([matchup.levels[n] for n in LEVEL_NAMES]),
+            np.array([getattr(row, n) for n in LEVEL_NAMES]),
         )
         assert tuple(matchup.flags[n] for n in FLAG_NAMES) == tuple(
             getattr(row, n) for n in FLAG_NAMES
