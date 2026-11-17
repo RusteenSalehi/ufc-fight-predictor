@@ -6,7 +6,8 @@ and creating it is a manual step (`{"version": "xgboost-71fab189-44ddd3f0"}`).
 
 The block between the GENERATED markers is rebuilt from the metrics files by the last command below and is
 replaced on every run. Everything above it is written by hand and uses only numbers from that block. The
-"Era-shift diagnostic" section after the block is also written by hand, from the output of its own command.
+"Era-shift diagnostic" and "Production refit" sections after the block are also written by hand, each from the
+output of its own command.
 
     uv run python -m ufc.ingest fetch
     uv run python -m ufc.ingest load
@@ -711,3 +712,40 @@ through 2022; what upstream held in those years is not known from this history.
   the conclusions above rest on differences of 0.007 or more, or on their absence.
 - **Families that overlap.** Removing one at a time understates each. Fitting on one family alone, by era,
   would say more about where the gap lives.
+
+## Production refit
+
+Written by hand on 2026-11-17 from `data/reports/eval/refit.json`, which one command writes:
+
+    uv run python -m ufc.models refit
+
+**From now on, the only out-of-sample evidence for the live model is predictions published before events.**
+The model that goes live is `xgboost-ffc3ca8c-ee729619`. It is the recipe of the candidate above, refitted
+on every completed bout through 2026-11-14 (DECISIONS D47). It has no held-out test: the validation and
+test periods are now part of its training data. Every number earlier in this report describes the
+candidate `xgboost-71fab189-44ddd3f0` and the recipe, not this model. Nothing has been approved:
+`data/models/approved.json` does not exist.
+
+- **Fitted on:** 7,841 bouts with a winner and no attribute gap; 405 trees. Elo parameters refitted on all
+  bouts (K 56, finish multiplier 1.3, against 1.15 for the candidate).
+- **Calibration:** Platt slope 1.393, fitted on the out-of-time predictions of a model fitted through
+  2024-12-31 (405 trees, 6,930 bouts) for the 911 bouts from 2025-01-11 to 2026-11-14 without an attribute
+  gap. With the 102 attribute-gap bouts included the slope would be 1.284. The candidate's slope, fitted on
+  2023 to 2024, was 1.216.
+- **The mismatch the calibration carries:** on the 6,930 bouts both models were fitted on, the final
+  booster's mean absolute logit is 0.531 against the calibration model's 0.510, a ratio of 1.042. Early
+  stopping inside the final window would have chosen 786 trees and a ratio of 1.161; it is not used (D47).
+- **Checks:** P(A) + P(B) is exactly 1 and swapping the fighters swaps the probabilities exactly, on all 560
+  bouts from 2025-11-15 to 2026-11-14. The feature list (136 inputs), the feature settings apart from the
+  training cut-off, and the feature table's columns and types are identical to the candidate's.
+- **Against the candidate, on the 506 bouts of 2026:** correlation of P(A wins) 0.941, mean absolute
+  difference 0.061 (median 0.053, 90th percentile 0.127, largest 0.219), and the two pick different
+  winners in 52. The refit is more confident: its favourite averages 67.9% against the candidate's
+  64.3%. The refit was fitted on these bouts, so their outcomes say nothing about which model is better,
+  and no log loss is reported for it.
+
+The refit is more confident than the candidate for two reasons: the slope fitted on 2025 to 2026, and a
+booster fitted on more data. 2025 to 2026 is the period the era-shift diagnostic could not explain. If
+recent cards stop being as predictable as they were there, live predictions will be overconfident, and the
+calibration table of published predictions is where that will show first.
+

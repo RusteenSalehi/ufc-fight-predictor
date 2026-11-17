@@ -118,6 +118,7 @@ uv run python -m ufc.models train       # select on validation, save the candida
 uv run python -m ufc.models evaluate    # score the saved candidate on the test period; walk-forward backtest
 uv run python -m ufc.models report      # write the generated part of docs/MODEL_REPORT.md
 uv run python -m ufc.models.diagnostics # analysis only: era-shift checks (D45); reads the test period
+uv run python -m ufc.models refit       # production refit of the candidate's recipe on every bout (D47)
 ```
 
 1. **Splits** (`splits.py`): train through 2022-12-31, validation 2023 to 2024, test from 2025. All rows reach model code through `Splits`, which refuses test-period rows until `evaluate` unlocks them for a saved candidate. Fitting uses bouts with a winner and no attribute gap (D44).

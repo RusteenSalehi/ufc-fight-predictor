@@ -48,7 +48,7 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - `src/ufc/models/`: splits with a test-period lock, exact-symmetry inference, Elo and logistic baselines, XGBoost and LightGBM, calibration, ablation, registry, plots. Design choices are in DECISIONS D35 to D44.
 - A leak through missing profile attributes was found on the training period and removed before the test period was opened (D44).
 - Results, including the choices validation could not separate and the families that did not help, are in `docs/MODEL_REPORT.md`. The candidate is not approved; `data/models/approved.json` is written by hand.
-- Open for M5: bouts with an attribute gap (mostly recent debutants) need the "limited data" label; prediction must build features with the settings and fitted parameters stored beside the model (`feature_pipeline.json`); whether to refit the recipe on data through the present before going live is a decision for the user.
+- Open for M5: bouts with an attribute gap (mostly recent debutants) need the "limited data" label; prediction must build features with the settings and fitted parameters stored beside the model (`feature_pipeline.json`); the recipe has been refitted on data through 2026-11-14 as `xgboost-ffc3ca8c-ee729619` (D47; not approved), and M5 predicts with whichever version `approved.json` names.
 
 ## M2 (Sonnet 5.5, medium effort): done
 
