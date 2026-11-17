@@ -596,10 +596,15 @@ def run_refit(args: argparse.Namespace) -> int:
         f"{record['n_training_bouts']} bouts"
     )
     print(
-        f"  Platt slope {cal['slope']:.4f} from a model fitted through "
-        f"{cal['model_fitted_through']} ({cal['model_n_trees']} trees), on "
-        f"{cal['n_bouts']} later bouts"
+        f"  Platt slope {cal['slope']:.4f} ({cal['window']} window, "
+        f"{cal['model_n_trees']} trees) on {cal['n_bouts']} out-of-time bouts:"
     )
+    for segment in cal["segments"]:
+        print(
+            f"    {segment['dates'][0]} to {segment['dates'][1]}: "
+            f"{segment['n_bouts']} bouts predicted by the model fitted through "
+            f"{segment['predicted_by_model_fitted_through']}"
+        )
     print(f"  symmetry: {checks['symmetry']}")
     print(f"  schema matches the candidate: {checks['schema']['all']}")
     if live is not None:
