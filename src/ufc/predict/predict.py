@@ -1,4 +1,4 @@
-"""Predictions for upcoming bouts with the approved model.
+"""Predictions for upcoming bouts with the approved model (D53).
 
 The model is the version ``data/models/approved.json`` names (D4); nothing
 here chooses one. Inputs are built the way the model's training inputs were:

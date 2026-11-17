@@ -1,6 +1,6 @@
 """Height, reach and date of birth from a fighter's Wikipedia infobox.
 
-Used only to fill attributes that the published dataset lacks (D46, D48).
+Used only to fill attributes that the published dataset lacks (D46, D51).
 Only a few unambiguous shapes are read; anything else is "not found", never a
 guess. Values outside plausible ranges are rejected.
 """

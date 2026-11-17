@@ -71,9 +71,24 @@ Known limits of the dataset, all surfaced by the validation report rather than h
 - Fighter profiles are captured when a fighter first appears and only rarely refreshed upstream (once, in autumn 2025, as far as its history from December 2024 shows; DECISIONS D46). Height and reach are often empty for recent debutants, and names can go stale.
 - A few fights cannot be placed or attributed and are dropped (3 of 9,003 in the snapshot at commit `96adace`; run `uv run python -m ufc.ingest load --dry-run` to list them).
 
-### Upcoming cards: Wikipedia (milestone M5, not built yet)
+### Upcoming cards and predictions (`src/ufc/predict/`, M5)
 
-The dataset covers completed events only. Upcoming cards will be read from English Wikipedia through the MediaWiki API (`action=parse`, wikitext): the "Scheduled events" table of `List of UFC events` gives event pages and dates, and each event page lists bouts as `{{MMAevent bout|weight class|fighter|vs.|fighter|...}}` templates plus an "Announced bouts" list. Feasibility was confirmed against a live page; the saved responses are in `tests/fixtures/wikipedia/`. Wikipedia carries no UFCStats IDs, so upcoming bouts need their own IDs and the same name-to-ID resolution as above.
+```
+uv run python -m ufc.predict refresh   # cards from Wikipedia, predictions, data/publish/predictions.json
+```
+
+The dataset covers completed events only. Upcoming cards come from English Wikipedia through the MediaWiki API (D16, D48); ufcstats.com is never requested. One refresh:
+
+1. **Schedule** (`wikipedia.py`, `cards.py`): "List of UFC events", read with `query`+`revisions`. Its "Scheduled events" table gives each event's page and date; its "Past events" table is used for staleness. If it cannot be read, the refresh stops and nothing changes.
+2. **Cards**: every scheduled event page in one request; bouts from `{{MMAevent bout|class|fighter|vs.|fighter|...}}` templates in page order, with the card segment, weight class mapped to the dataset's labels, linked article and title-bout note. "Announced bouts" lists are not predicted. Wikipedia text is untrusted: anything of unexpected shape is a parse error, not a guess.
+3. **Resolution** (`resolve.py`, D49): the ingest's resolver and overrides, plus `wikipedia_overrides.csv`. Unknown names become provisional fighters (presumed debutants); ambiguous names, placeholders and veterans spelled differently (detected when their article cites a UFCStats profile in the dataset) make the bout unresolved.
+4. **Card changes** (`cards_db.py`, D50): each card is applied in one transaction (new pairings added, missing ones cancelled with their predictions superseded) or, if unreadable or implausible, not at all.
+5. **Staleness** (`staleness.py`, D52): completed events after the dataset's latest; bouts with a fighter on one of them are labelled "stale stats".
+6. **Backfill** (`backfill.py`, `infobox.py`, D51): missing height, reach and date of birth from the linked article's infobox, for predictions only.
+7. **Predictions** (`predict.py`, D53): the approved model, the feature settings and fitted parameters stored with it, `build_matchup` at the event date. New rows only when inputs change.
+8. **Publish** (`publish.py`): the validation gate, then a plain JSON dump of current predictions in `data/publish/predictions.json` (the site's artifact layout is M6).
+
+Requests: two to four per refresh (list, event pages, provisional fighters' articles, articles for backfill), one at a time, spaced, cached; see D48. Test fixtures are saved API responses (`tests/fixtures/wikipedia/`, written by `scripts/save_wikipedia_fixtures.py`); no test touches the network.
 
 ## Database schema (SQLite)
 
@@ -88,7 +103,12 @@ The schema is `src/ufc/db/schema.sql`. Deviations from the original plan are exp
 - **bout_fighter_stats**: (bout_id, fighter_id) PK; the same columns, derived at load time by summing the fighter's rounds
 - **source_files**: file_name (PK), sha256, row_count, upstream_repo, upstream_commit, snapshot_at. Which snapshot the tables were last loaded from.
 - **ingest_issues**: seq (PK), severity (`error` = data dropped, `warning`, `info`), check_name, entity_type, entity_id, message. The validation report of the last load.
-- **predictions**: defined in M5, once upcoming-bout identity is settled. Planned columns: prediction_id, bout_id, model_version, created_at, p_fighter_a, p_fighter_b, features_json, shap_json, superseded_at (nullable), is_live (true if published before the event)
+- **upcoming_events** (M5): event_key (PK, `wp:<page ID>`), pageid, page_title, name, date, revid, status (`scheduled` / `past` / `unlisted`), first_seen_at, last_seen_at, card_applied_at
+- **upcoming_bouts** (M5): bout_id (PK, `wb` + 16 hex from page ID and sorted name keys), event_key, card_order, segment, weight_class_raw, weight_class, is_title_bout, name_a/page_a, name_b/page_b, fighter_a_ref/fighter_b_ref (UFCStats ID or provisional ID; NULL when unresolved), method_a/method_b, unresolved_reason, status (`scheduled` / `cancelled`), first_seen_at, last_seen_at, cancelled_at
+- **provisional_fighters** (M5): provisional_id (PK, `wp:<article>` or `wpname:<name>`), page_title, name, fighter_id (set once linked), first_seen_at, last_seen_at, linked_at
+- **attribute_backfill** (M5): (fighter_ref, field) PK; value, source (`wikipedia`), page_title, revid, fetched_at. Never copied into `fighters`.
+- **predictions** (M5): prediction_id (PK), bout_id (upcoming_bouts), model_version, created_at, event_date, fighter_a_ref, fighter_b_ref, p_fighter_a, p_fighter_b, inputs_sha256, features_json (model inputs, flags, per-fighter values, attribute sources), shap_json (M6), limited_data, limited_reasons_json, is_live, superseded_at, superseded_reason. At most one current (not superseded) row per bout.
+- **refresh_log** (M5): seq, run_at, level, event_key, message. Append-only.
 
 Loaders are idempotent upserts keyed on UFCStats IDs: running the same load twice produces identical tables. Timestamps come from the snapshot (the upstream commit date), not the clock.
 
@@ -139,6 +159,7 @@ Each refresh reads upcoming events (from Wikipedia, see above) and compares with
 - Bout no longer on the card: mark `cancelled`, set `superseded_at` on its predictions
 - Replacement opponent: this is a new bout_id; old one is cancelled, new one predicted
 - Every bout tracks `first_seen_at` and `last_seen_at`
+- A page that cannot be read, or a card that loses all or most of its bouts at once, changes nothing (D50)
 
 ## Validation gate
 

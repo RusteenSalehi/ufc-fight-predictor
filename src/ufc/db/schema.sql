@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS ingest_issues (
 -- ---------------------------------------------------------------------------
 -- Upcoming cards and predictions (M5). Read from English Wikipedia, which has
 -- no UFCStats IDs, so these tables have keys of their own and never write to
--- the tables above. DECISIONS D48 to D52.
+-- the tables above. DECISIONS D48 to D53.
 
 -- One row per event page. The key is the article's page ID, which survives
 -- the page being renamed when a headliner changes.
