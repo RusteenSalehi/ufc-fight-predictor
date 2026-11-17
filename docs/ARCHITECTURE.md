@@ -92,6 +92,23 @@ The schema is `src/ufc/db/schema.sql`. Deviations from the original plan are exp
 
 Loaders are idempotent upserts keyed on UFCStats IDs: running the same load twice produces identical tables. Timestamps come from the snapshot (the upstream commit date), not the clock.
 
+## Feature pipeline (`src/ufc/features/`)
+
+```
+uv run python -m ufc.features build      # fit on the training period, build, write data/features/
+uv run python -m ufc.features summary    # every feature by family, with missing-value counts
+```
+
+1. **Read** completed bouts, per-fight and per-round stats, and fighter attributes from SQLite (`data.py`).
+2. **Fit** on bouts through 2022-12-31 only: Elo parameters by log loss of pre-fight predictions (`elo.py`), and the league-average stat line used as a prior for opponent baselines (`adjust.py`).
+3. **Build** one date at a time (`build.py`). Features for every bout on a date are computed from a store that holds earlier dates only; the date's bouts are added afterwards. Each bout enters the store as one vector of additive counts per fighter, and each fighter keeps running sums of those vectors (`components.py`, `store.py`), so career, last-3, last-5 and time-decayed rates are lookups.
+4. **Assemble** each bout's row (`fighter.py`, `matchup.py`): every model feature is fighter A's value minus fighter B's, or a pair value minus its mirror image, so swapping the fighters negates the row exactly.
+5. **Write** `features.parquet` (identity, bout context, `label`, four per-fighter flags, then the `d_` features) and `features_meta.json` (snapshot commit, settings, fitted parameters, ordered feature list, feature-to-family map).
+
+`build_matchup(store, fighter_a_id, fighter_b_id, date, weight_class)` returns the same features for any pair and date, real or hypothetical, plus each fighter's own as-of values for display. It reads histories through one lookup that returns only bouts strictly before the date. The batch build calls the same code, and a test checks that both give identical rows for every bout.
+
+Design choices are in DECISIONS D23 to D29.
+
 ## Handling card changes
 
 Each refresh reads upcoming events (from Wikipedia, see above) and compares with the database:

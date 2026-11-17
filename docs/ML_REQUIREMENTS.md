@@ -44,6 +44,7 @@ All computed as of the cutoff. Where useful, both career and rolling (last 3 and
 9. **Opponent-adjusted stats:** each stat compared with what that fighter's opponents typically allowed or achieved against others, as of the cutoff. Example: if a fighter's opponents usually land 40% of takedown attempts against others but only 20% against him, his adjusted takedown defense is strong. Computed with careful as-of handling, since opponents' baselines must also respect the cutoff.
 10. **Style matchups:** A's offense against B's defense (takedown offense vs takedown defense, strike volume vs striking defense, and so on)
 11. **Debut flag:** fighter has zero prior UFC bouts; their stats are missing, not zero
+12. **Per-round pace and cardio:** from per-round stats, how a fighter's output and defense in rounds 3 and later compare with round 1: significant strikes landed, attempted, and absorbed per minute in rounds 3+ divided by the round-1 rate, and the change in accuracy and defense. Only bouts that went past round 2 are used; the features are NaN for a fighter with no such bout.
 
 ## Recency weighting
 
@@ -75,7 +76,7 @@ Calibrate the chosen model on the validation set (isotonic or Platt; pick by val
 - Primary selection metric: log loss
 - Also report: Brier score, accuracy, expected calibration error, reliability diagram
 - Breakdowns: by year, by confidence bucket, debut bouts separately, by weight class only where sample size allows
-- Feature ablation: remove each feature family, report change in validation log loss
+- Feature ablation: remove each of the twelve feature families in turn, including family 12 (per-round pace and cardio), and report the change in validation log loss. The feature-to-family map is the `families` entry of `data/features/features_meta.json`.
 
 ## Model registry
 

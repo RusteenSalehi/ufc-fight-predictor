@@ -34,6 +34,13 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - Tests run against a small real-data fixture (`tests/fixtures/greco/`) covering draws, no contests, DQs, missing attributes, early events without stats, split decisions, title bouts, women's bouts, and the dataset's own defects.
 - Saved Wikipedia API responses (`tests/fixtures/wikipedia/`) confirming that upcoming cards can be parsed in M5.
 
+## M3 (Fable 5.2, high effort): done
+
+- `uv run python -m ufc.features build`: fits Elo parameters and league baselines on bouts through 2022-12-31, builds one row per completed bout, and writes `data/features/features.parquet` and `features_meta.json`. Rerunning replaces both with identical content.
+- `uv run python -m ufc.features summary`: lists every feature by family with its missing-value counts.
+- `src/ufc/features/`: as-of store, Elo, per-fighter features for families 1 to 12 (style archetypes excluded), opponent adjustment, matchup assembly. `build_matchup` gives the same features for a hypothetical bout from two fighter IDs and a date.
+- Tests: perturbation, same-event, symmetry, and a hand-calculated spot check on four real bouts (`tests/fixtures/greco_spot_check/`). Design choices are in DECISIONS D23 to D29.
+
 ## M2 prompt (Sonnet 5.5, medium effort)
 
 ```
@@ -70,7 +77,7 @@ Read CLAUDE.md and every file in docs/ before starting; ML_REQUIREMENTS.md is bi
 3. Candidates: XGBoost and LightGBM trained on both orientations with recency sample weights. Tune on validation (log loss) with a modest search; choose the half-life on validation.
 4. Calibrate the selected model on validation. Inference averages both orientations.
 5. Symmetry test as specified.
-6. Feature-family ablation on validation.
+6. Feature-family ablation on validation, over all twelve families in data/features/features_meta.json (family 12 is per-round pace and cardio).
 7. Evaluate the final candidate and all baselines once on the test period. Produce data/reports/eval/ with metrics JSON and plots (reliability diagrams, metrics by year, by confidence bucket, debut bouts separately), and a yearly walk-forward backtest.
 8. Implement the model registry described in ML_REQUIREMENTS.md and save the model. Do not edit approved.json; I will promote it.
 9. Write docs/MODEL_REPORT.md with only numbers produced by the code, including ablations that did not help. Append decisions. Commit in small steps. Do not push.
