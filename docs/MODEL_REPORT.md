@@ -461,9 +461,11 @@ Written by the commands above, under `data/` (not committed):
 
 ## Era-shift diagnostic
 
-Written by hand on 2026-11-17 from `data/reports/diagnostics/era_shift.json`, which one command writes:
+Written by hand on 2026-11-17 from `data/reports/diagnostics/era_shift.json` and, for check 6,
+`profile_history.json` beside it. Two commands write them, in this order:
 
     uv run python -m ufc.models.diagnostics
+    uv run python scripts/profile_history.py    # downloads earlier commits of upstream's profile file
 
 Question: why do 2025 and 2026 score better than every earlier backtest year, and is it a leak? The command
 is analysis only. It does not select, save or change a model, and nothing below was used to change the
@@ -478,6 +480,13 @@ back clean. What the checks do show is that the better scores are a property of 
 not of the model or of the test boundary: a model fitted through 2016 and never touched again shows the
 same drop, and so do one-line rules with no model at all. The checks cannot tell a real change in the sport
 from a defect in the source's recent rows that I have not thought of. Closing odds would (see "Not checked").
+
+**One documented assumption turned out to be false, and it matters for live use, not for the leak question.**
+Upstream does refresh profiles: one refresh between 2025-09-30 and 2025-11-14 changed 698 of them (check 6).
+Bouts whose fighters' profiles were edited after the bout do not score better than the rest, so this is not
+where the gap comes from. But most of 2025 was scored with heights, reaches, stances and dates of birth
+that a pipeline running on the day would not have had. 2026, fought after the refresh, has the missing
+values a live run will see, and is the better guide to live performance.
 
 ### 1. Single-feature rules by year: no leak found; the shift is visible without any model
 
@@ -565,11 +574,12 @@ one family, which is what removing one overlapping family at a time would show e
 ### 4. Profile capture: no leak found
 
 The database has no capture time for a profile. This check takes 22 Nov 2025 as upstream's last full
-refresh of existing profiles (the debut cut-off in `docs/DATA_QUALITY.md`, where the capture behaviour is a
-hypothesis, not a tested fact): a fighter who debuted before it has a profile from that refresh or earlier,
-and a later debutant was captured when first listed. On that reading, for a bout after the refresh between
-two fighters who debuted before it, both profiles were captured before the bout and cannot hold anything
-from after it. The conclusion below is only as good as that reading.
+refresh of existing profiles (the debut cut-off in `docs/DATA_QUALITY.md`): a fighter who debuted before it
+has a profile from that refresh or earlier, and a later debutant was captured when first listed. On that
+reading, for a bout after the refresh between two fighters who debuted before it, both profiles were
+captured before the bout and cannot hold anything from after it. Check 6 tests the reading against
+upstream's history: the refresh happened a few weeks earlier (between 2025-09-30 and 2025-11-14), and no
+existing profile has changed since 2025-11-14, so the groups below are what they claim to be.
 
 | test-period bouts | bouts | model log loss | accuracy | without profile inputs | logistic regression | Elo |
 |---|---:|---:|---:|---:|---:|---:|
@@ -620,14 +630,73 @@ the fighter with the complete profile won 44.1% of the 102 one-sided bouts, agai
 - **Fighter order in the source, Elo ties:** not a path. Inputs are differences and every probability is
   the average of both orientations, which the symmetry test on all test-period bouts confirms exactly.
 
+### 6. Profile history: profiles were edited after the fact; no sign that it helps the model
+
+`scripts/profile_history.py` downloads upstream's profile file as it was at the last commit before six
+dates and compares the parsed attributes with the pinned snapshot.
+
+| upstream commits compared | profiles in both | new profiles | profiles with any attribute changed |
+|---|---:|---:|---:|
+| 2024-12-11 to 2025-02-14 | 4,268 | 9 | 0 |
+| 2025-02-14 to 2025-06-20 | 4,277 | 102 | 0 |
+| 2025-06-20 to 2025-09-30 | 4,379 | 70 | 0 |
+| 2025-09-30 to 2025-11-14 | 4,444 | 4 | 698 |
+| 2025-11-14 to 2025-11-23 | 4,448 | 1 | 0 |
+| 2025-11-23 to 2026-11-15 (pinned) | 4,449 | 180 | 0 |
+
+So "captured once and never refreshed" (D14, D22, ARCHITECTURE) is wrong: there was one refresh, between
+2025-09-30 and 2025-11-14, and nothing before it in 2025 or after it. Of the 791 fighters with a
+test-period bout, 622 already had a profile on 2024-12-11, and 281 of those profiles differ today:
+
+| attribute, 622 test-period fighters listed on 2024-12-11 | unchanged | empty then, filled since | value changed | empty in both |
+|---|---:|---:|---:|---:|
+| height | 396 | 206 | 18 | 2 |
+| reach | 352 | 258 | 9 | 3 |
+| stance | 367 | 251 | 1 | 3 |
+| date of birth | 550 | 47 | 25 | 0 |
+
+No value went from present to empty. Over all profiles, 37 dates of birth changed; the median change is
+0.21 years, 29 are under one year and the largest is 4.9 years. Test-period results, grouped by what
+happened to the two fighters' profiles after 2024-12-11:
+
+| test-period bouts | bouts | model | without profile inputs | without date of birth | logistic regression | Elo | model accuracy |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| all | 1,013 | 0.6188 | 0.6376 | 0.6350 | 0.6254 | 0.6789 | 65.9% |
+| both profiles unchanged | 247 | 0.6162 | 0.6295 | 0.6296 | 0.6407 | 0.6740 | 65.6% |
+| both listed, either profile changed | 508 | 0.6007 | 0.6242 | 0.6214 | 0.6029 | 0.6773 | 67.9% |
+| either fighter not listed yet | 258 | 0.6570 | 0.6719 | 0.6672 | 0.6552 | 0.6868 | 62.2% |
+| before 2025-09-30, both profiles unchanged | 113 | 0.5983 | 0.6055 | 0.6071 | 0.6076 | 0.6611 | 68.1% |
+| before 2025-09-30, both listed, either changed | 241 | 0.6267 | 0.6421 | 0.6349 | 0.6301 | 0.6780 | 68.0% |
+| either date of birth filled in later | 122 | 0.6242 | 0.6607 | 0.6499 | 0.6238 | 0.6923 | 65.6% |
+| either date of birth changed | 74 | 0.5764 | 0.6025 | 0.5862 | 0.5944 | 0.6564 | 71.6% |
+
+**No leak found.** The 247 bouts between fighters whose profiles have not changed since before the test
+period score 0.6162, the level of the whole period and far from the 0.6619 of 2013 to 2024. The cleanest
+comparison is the bouts fought before the refresh: where a profile was edited after the bout (241) the
+model scores 0.6267, worse than where neither was (113 bouts, 0.5983). The 74 bouts with a changed date of
+birth do score well (0.5764), but so does the model that never sees a date of birth (0.5862) and so does
+Elo (0.6564, against 0.6789 overall): those are easier bouts, not bouts that the change made easier. These
+groups are small and differ in who is in them, so this rules out a large effect, not a small one.
+
+**What it does change.** For the bouts of 2025 fought before the refresh, the model was given attributes
+that upstream did not hold on the day: 206 of 622 fighters had no height on 2024-12-11, 258 no reach and 47
+no date of birth, and the fighters first listed during 2025 are on top of that. A live run would have
+treated many of those bouts as attribute-gap bouts, where the model has 0.7251 (test-period table above).
+That is hindsight in what was available, not in who won, and the rules allow it (leakage rule 3 takes
+attributes from current profiles). It does mean the 2025 figure flatters a live pipeline, and the same may
+be true of every backtest year, since this history only says what upstream held from December 2024. The
+2026 figures (0.6261 in the backtest, 0.6316 for the registered model) include the gaps a live run will see.
+
 ### Not checked
 
 - **Closing odds.** If bookmakers' favourites also won more often from 2024, the change is in the sport;
   if not, it is in this data. Historical odds are not sourced yet (baseline 3 in ML_REQUIREMENTS). This is
   the check most likely to settle the question.
-- **Profile values as they stood at bout time.** Only capture timing was tested, through debut dates. The
-  upstream repository has history; comparing a commit of its profile file from before 2025 with the pinned
-  one would show whether heights, reaches, stances or dates of birth were edited afterwards.
+- **What a live run would have scored in 2025.** Check 6 shows profiles were more complete in the table
+  than on the day. Rebuilding each 2025 bout's features from the upstream commit current on its date, and
+  scoring that, would measure it. Not done: it is a new feature build, and it was out of time.
+- **Profile history before December 2024.** Whether earlier refreshes happened, and so how much hindsight
+  the backtest years carry, was not looked at. Upstream's history goes back further.
 - **A change in how the source records recent bouts** (stat definitions, corrections applied only to recent
   events). Nothing above would catch it.
 - **Why 2024.** Older, more experienced rosters and wider age gaps are described in check 2, not shown to be

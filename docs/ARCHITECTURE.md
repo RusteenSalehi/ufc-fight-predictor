@@ -68,7 +68,7 @@ uv run python -m ufc.ingest load      # validate, then load data/ufc.db
 
 Known limits of the dataset, all surfaced by the validation report rather than hidden:
 - It starts at UFC 2 (1994-03-11). UFC 1 is absent.
-- Fighter profiles are captured once, when a fighter first appears, and not refreshed upstream. Height and reach are often empty for recent debutants, and names can go stale.
+- Fighter profiles are captured when a fighter first appears and only rarely refreshed upstream (once, in autumn 2025, as far as its history from December 2024 shows; DECISIONS D46). Height and reach are often empty for recent debutants, and names can go stale.
 - A few fights cannot be placed or attributed and are dropped (3 of 9,003 in the snapshot at commit `96adace`; run `uv run python -m ufc.ingest load --dry-run` to list them).
 
 ### Upcoming cards: Wikipedia (milestone M5, not built yet)
