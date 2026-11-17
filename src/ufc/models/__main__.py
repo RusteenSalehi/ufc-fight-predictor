@@ -3,6 +3,7 @@
 uv run python -m ufc.models train       select on validation, save the candidate
 uv run python -m ufc.models evaluate    score the saved candidate on the test period
 uv run python -m ufc.models report      write the generated part of docs/MODEL_REPORT.md
+uv run python -m ufc.models refit       refit the candidate's recipe on all data (D47)
 
 ``train`` never reads a test-period row. ``evaluate`` is the only command
 that unlocks the test period, and it scores the candidate exactly as it was
@@ -37,6 +38,8 @@ from ufc.features.matchup import FEATURE_NAMES, LEVEL_NAMES, SHRUNK_FEATURE_NAME
 from ufc.models import plots, registry
 from ufc.models.evaluate import evaluate_period
 from ufc.models.gbm import MAX_TREES, PATIENCE
+from ufc.models.refit import STATUS as REFIT_STATUS
+from ufc.models.refit import compare_predictions, refit, schema_check, symmetry_check
 from ufc.models.report import write_report
 from ufc.models.select import SelectionSettings, baseline_predictions, select
 from ufc.models.splits import (
@@ -222,6 +225,13 @@ def run_evaluate(args: argparse.Namespace) -> int:
         return 1
     version = args.version or json.loads(selection_path.read_text())["version"]
     candidate, manifest = registry.load_candidate(args.models, version)
+    if registry.is_refit(manifest):
+        print(
+            f"{version} is a production refit, fitted on the test period; it has "
+            "no held-out test to evaluate on.",
+            file=sys.stderr,
+        )
+        return 1
     config = registry.read_json(args.models, version, "config.json")
     feature_meta = registry.read_json(args.models, version, "feature_pipeline.json")
     spec = candidate.spec
@@ -316,6 +326,158 @@ def run_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- refit ---------------------------------------------------------------------
+
+REFIT_FILE = "refit.json"
+
+
+def run_refit(args: argparse.Namespace) -> int:
+    selection_path = args.reports / SELECTION_FILE
+    if args.candidate is None and not selection_path.exists():
+        print(f"No {selection_path}; run train first.", file=sys.stderr)
+        return 1
+    parent = args.candidate or json.loads(selection_path.read_text())["version"]
+    old, old_manifest = registry.load_candidate(args.models, parent)
+    if registry.is_refit(old_manifest):
+        print(f"{parent} is already a refit; refit a candidate.", file=sys.stderr)
+        return 1
+    old_config = registry.read_json(args.models, parent, "config.json")
+    old_pipeline = registry.read_json(args.models, parent, "feature_pipeline.json")
+    data = _load_data(args.db)
+    if data is None:
+        return 1
+
+    # The candidate's own inputs, rebuilt from its stored settings. Rows up to
+    # its last bout must be the table it was trained from (later bouts, if the
+    # snapshot is newer, are added rows and change nothing before them).
+    old_build = build_features(data, feature_config_from(old_pipeline))
+    old_frame = old_build.frame
+    upto = old_frame[old_frame["date"] <= pd.Timestamp(old_pipeline["last_date"])]
+    if (
+        registry.dataset_hash(upto, old.spec)
+        != old_manifest["dataset"]["feature_table_sha256"]
+    ):
+        print(
+            f"The database does not rebuild the table {parent} was trained from.",
+            file=sys.stderr,
+        )
+        return 1
+
+    reason = f"production refit of {parent}"
+    result = refit(data, old.recipe, feature_config_from(old_pipeline), reason)
+    frame = result.final.frame
+    meta = build_meta(result.final, data.source_commit)
+    last = frame["date"].max()
+    recent = frame[frame["date"] > last - pd.Timedelta(days=365)]
+    checks = {
+        "symmetry": symmetry_check(result.candidate, recent),
+        "schema": schema_check(
+            result.candidate.spec.to_dict(),
+            old.spec.to_dict(),
+            meta,
+            old_pipeline,
+            frame,
+            old_frame,
+        ),
+        "versus_candidate": compare_predictions(
+            result.candidate, frame, old, old_frame, int(last.year)
+        ),
+    }
+    passed = (
+        checks["symmetry"]["sum_is_exactly_one"]
+        and checks["symmetry"]["swap_is_exact"]
+        and checks["schema"]["all"]
+    )
+    record = {
+        "status": REFIT_STATUS,
+        "parent": parent,
+        "fitted_through": last.date().isoformat(),
+        "source_commit": data.source_commit,
+        "n_training_bouts": len(result.final_rows),
+        "trees": result.trees,
+        "calibration": result.calibration,
+        "sharpness": result.sharpness,
+        "checks": checks,
+        "checks_passed": passed,
+    }
+    if not passed:
+        _write_json(args.reports / REFIT_FILE, record)
+        print("A sanity check failed; nothing was saved.", file=sys.stderr)
+        print(json.dumps(checks, indent=2), file=sys.stderr)
+        return 1
+
+    spec = result.candidate.spec
+    config = {
+        "recipe": old_config["recipe"],
+        "n_trees": result.candidate.model.n_trees,
+        "shrink_minutes": old_config["shrink_minutes"],
+        "early_stopping": old_config["early_stopping"],
+        "baseline_logistic_c": old_config["baseline_logistic_c"],
+        "production_refit": {
+            "status": REFIT_STATUS,
+            "parent": parent,
+            "fitted_through": record["fitted_through"],
+            "trees": result.trees,
+            "calibration": result.calibration,
+        },
+    }
+    saved = registry.save_candidate(
+        args.models,
+        result.candidate,
+        config=config,
+        feature_pipeline=meta,
+        metrics={
+            "validation": None,
+            "note": (
+                "No held-out metrics: every period was used for fitting. The "
+                f"recipe was validated and tested as {parent}."
+            ),
+            **{k: record[k] for k in ("calibration", "sharpness", "checks")},
+        },
+        dataset={
+            "training_sha256": registry.dataset_hash(result.final_rows, spec),
+            "feature_table_sha256": registry.dataset_hash(frame, spec),
+            "n_training_bouts": len(result.final_rows),
+            "last_event": record["fitted_through"],
+            "source_commit": data.source_commit,
+        },
+        git=registry.git_state(),
+        created_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        lineage={
+            "parent": parent,
+            "parent_training_sha256": old_manifest["dataset"]["training_sha256"],
+            "status": REFIT_STATUS,
+        },
+    )
+    record["version"] = saved.version
+    _write_json(args.reports / REFIT_FILE, record)
+
+    cal, versus = record["calibration"], checks["versus_candidate"]
+    print(f"Refit of {parent} on bouts through {record['fitted_through']}")
+    print(
+        f"  final booster: {saved.manifest['n_trees']} trees on "
+        f"{record['n_training_bouts']} bouts"
+    )
+    print(
+        f"  Platt slope {cal['slope']:.4f} from a model fitted through "
+        f"{cal['model_fitted_through']} ({cal['model_n_trees']} trees), on "
+        f"{cal['n_bouts']} later bouts"
+    )
+    print(f"  symmetry: {checks['symmetry']}")
+    print(f"  schema matches the candidate: {checks['schema']['all']}")
+    print(
+        f"  versus the candidate on {versus['year']}: correlation "
+        f"{versus['correlation']:.4f}, mean absolute difference "
+        f"{versus['mean_abs_difference']:.4f}"
+    )
+    print(
+        f"Saved {saved.version}"
+        + ("" if saved.created else " (already there, unchanged)")
+        + f"; promotion is a manual step. Record: {args.reports / REFIT_FILE}"
+    )
+    return 0
+
+
 # --- report --------------------------------------------------------------------
 
 
@@ -388,6 +550,14 @@ def build_parser() -> argparse.ArgumentParser:
     common(evaluate)
     inputs(evaluate)
     evaluate.add_argument("--version", help="default: the candidate train last saved")
+    refit_cmd = commands.add_parser(
+        "refit", help="refit the candidate's recipe on all data"
+    )
+    common(refit_cmd)
+    inputs(refit_cmd)
+    refit_cmd.add_argument(
+        "--candidate", help="default: the candidate train last saved"
+    )
     report = commands.add_parser("report", help="write docs/MODEL_REPORT.md")
     common(report)
     report.add_argument("--out", type=Path, default=DEFAULT_REPORT_DOC)
@@ -399,7 +569,12 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
     args = build_parser().parse_args(argv)
-    handlers = {"train": run_train, "evaluate": run_evaluate, "report": run_report}
+    handlers = {
+        "train": run_train,
+        "evaluate": run_evaluate,
+        "refit": run_refit,
+        "report": run_report,
+    }
     return handlers[args.command](args)
 
 

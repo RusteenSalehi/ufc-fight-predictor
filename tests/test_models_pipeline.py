@@ -331,3 +331,62 @@ def test_commands_fail_cleanly_without_their_inputs(tmp_path, capsys):
     assert cli.main(["evaluate", *common]) == 1
     assert cli.main(["report", *common, "--out", str(tmp_path / "x.md")]) == 1
     assert "run train first" in capsys.readouterr().err
+
+
+# --- production refit (D47) ------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def refitted(workspace):
+    """Run refit after train and evaluate, as the project does."""
+    args = ["refit", *workspace["train_args"][1:]]
+    assert cli.main(args) == 0
+    record = json.loads((workspace["reports"] / cli.REFIT_FILE).read_text())
+    return {**workspace, "refit_args": args, "refit": record}
+
+
+def test_refit_saves_a_new_version_with_lineage_and_approves_nothing(refitted):
+    parent = refitted["selection"]["version"]
+    record = refitted["refit"]
+    version = record["version"]
+    assert version != parent
+    assert set(registry.list_versions(refitted["models"])) == {parent, version}
+    candidate, manifest = registry.load_candidate(refitted["models"], version)
+    assert manifest["lineage"]["parent"] == parent
+    assert manifest["lineage"]["status"] == (
+        "production refit; no held-out test; recipe validated by the candidate"
+    )
+    assert registry.is_refit(manifest)
+    old, old_manifest = registry.load_candidate(refitted["models"], parent)
+    assert not registry.is_refit(old_manifest)
+    assert candidate.recipe == old.recipe  # the recipe is not changed
+    config = registry.read_json(refitted["models"], version, "config.json")
+    assert config["production_refit"]["parent"] == parent
+    pipeline = registry.read_json(refitted["models"], version, "feature_pipeline.json")
+    assert pipeline["config"]["train_end"] == record["fitted_through"]
+    assert pipeline["last_date"] == record["fitted_through"]
+    assert record["checks_passed"] and record["checks"]["schema"]["all"]
+    assert record["checks"]["symmetry"]["swap_is_exact"]
+    assert manifest["dataset"]["n_training_bouts"] == record["n_training_bouts"]
+    assert not (refitted["models"] / registry.APPROVED_FILE).exists()
+    # The feature file is still the candidate's, so evaluate's check still holds.
+    frame = pd.read_parquet(refitted["features"] / FEATURES_FILE)
+    assert (
+        registry.dataset_hash(frame, old.spec)
+        == old_manifest["dataset"]["feature_table_sha256"]
+    )
+
+
+def test_a_refit_cannot_be_evaluated_or_refitted_again(refitted, capsys):
+    version = refitted["refit"]["version"]
+    ledger = len(registry.read_ledger(refitted["models"]))
+    assert cli.main([*refitted["evaluate_args"], "--version", version]) == 1
+    assert "no held-out test" in capsys.readouterr().err
+    assert len(registry.read_ledger(refitted["models"])) == ledger
+    assert cli.main([*refitted["refit_args"], "--candidate", version]) == 1
+    assert "already a refit" in capsys.readouterr().err
+
+
+def test_refit_again_gives_the_same_version(refitted, capsys):
+    assert cli.main(refitted["refit_args"]) == 0
+    assert "already there, unchanged" in capsys.readouterr().out

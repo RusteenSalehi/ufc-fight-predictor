@@ -12,7 +12,9 @@ docs/ML_REQUIREMENTS.md, "Model registry". A version directory holds:
   model's inputs were built with, so prediction can rebuild them exactly
 - ``metrics.json``: validation metrics
 - ``manifest.json``: version, creation time, git commit, hashes of the
-  training and validation rows, library versions, SHA-256 of every file above
+  training and validation rows, library versions, SHA-256 of every file above,
+  and for a production refit its ``lineage``: the candidate it refits and a
+  status line saying it has no held-out test
 - ``test_metrics.json``: added once by the final evaluation
 
 ``approved.json`` next to the version directories names the approved version.
@@ -129,9 +131,14 @@ def save_candidate(
     dataset: Mapping,
     git: Mapping,
     created_at: str,
+    lineage: Mapping | None = None,
 ) -> SavedModel:
     """Write a new version directory. ``dataset`` must hold
-    ``training_sha256``; ``config`` must hold the recipe under ``recipe``."""
+    ``training_sha256``; ``config`` must hold the recipe under ``recipe``.
+    ``lineage`` (a production refit only) names the version whose recipe it
+    refits and must hold ``parent`` and ``status``."""
+    if lineage is not None and not {"parent", "status"} <= set(lineage):
+        raise ValueError("lineage must name the parent version and a status")
     library = candidate.model.library
     version = version_name(library, dataset["training_sha256"], config)
     directory = root / version
@@ -159,6 +166,8 @@ def save_candidate(
         "library_versions": library_versions(),
         "files": files,
     }
+    if lineage is not None:
+        manifest["lineage"] = dict(lineage)
 
     if directory.exists():
         existing = read_manifest(root, version)
@@ -208,6 +217,11 @@ def load_candidate(root: Path, version: str) -> tuple[Candidate, dict]:
         )
     calibrator = Calibrator.from_dict(read_json(root, version, "calibrator.json"))
     return Candidate(recipe, model, calibrator), manifest
+
+
+def is_refit(manifest: Mapping) -> bool:
+    """A production refit: fitted on every period, so it has no test."""
+    return "lineage" in manifest
 
 
 def list_versions(root: Path) -> list[str]:
