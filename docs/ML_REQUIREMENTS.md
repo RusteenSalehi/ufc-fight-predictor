@@ -26,6 +26,7 @@ Corner (red/blue) is never a feature; red corner correlates with being the favor
 
 - Features are expressed as A-minus-B differences (plus a few non-differenced fields like weight class).
 - Swap-invariant "level" features (the mean of the two fighters' age, UFC fights, and Elo) are allowed because swapping the fighters leaves them exactly unchanged. They are kept in separate `lvl_` columns and enter a model only if they improve validation log loss; the result is reported either way.
+- A family may also own a swap-invariant column (family 15's `lvl_age_rel_class`). It is not part of the optional level group: it enters and leaves the model with its family.
 - Training uses both orientations of every bout: (A, B, label) and (B, A, 1 - label).
 - Inference averages P(A beats B) and 1 - P(B beats A).
 - Symmetry test: for any bout, the final P(A) + P(B) = 1 exactly, and swapping inputs swaps outputs.
@@ -49,6 +50,8 @@ Per-minute and per-15-minute rates are shrunk toward the weight-class mean: `(co
 11. **Debut flag:** fighter has zero prior UFC bouts; their stats are missing, not zero
 12. **Per-round pace and cardio:** from per-round stats, how a fighter's output and defense in rounds 3 and later compare with round 1: significant strikes landed, attempted, and absorbed per minute in rounds 3+ divided by the round-1 rate, and the change in accuracy and defense. Only bouts that went past round 2 are used; the features are NaN for a fighter with no such bout.
 13. **Rating:** the fighter's own Elo rating as of the cutoff. Kept apart from family 8 so that the ablation can tell "how highly is he rated" from "whom has he fought".
+14. **Strength of schedule (candidate, not adopted):** best win and worst loss by the opponent's Elo at the time, and wins and losses against opponents then rated above the fighter. Computed and written to the feature table, but not a model input: it failed the M4.5 adoption rule (DECISIONS D54 to D56). A model reads it only if its feature list names it.
+15. **Age shape:** years past 32 and years past the weight class's median age, each `max(0, age - threshold)`, as A-minus-B differences; and the bout's mean age minus the class median as a swap-invariant column of this family. The class medians are fitted on the training period only (a class needs 50 training bouts and a fixed weight limit; otherwise the median over all training bouts is used). Adopted in M4.5 (DECISIONS D56, D58). Age comes from today's profiles (leakage rule 3).
 
 ## Recency weighting
 
@@ -80,7 +83,7 @@ Calibrate the chosen model on the validation set (isotonic or Platt; pick by val
 - Primary selection metric: log loss
 - Also report: Brier score, accuracy, expected calibration error, reliability diagram
 - Breakdowns: by year, by confidence bucket, debut bouts separately, by weight class only where sample size allows
-- Feature ablation: remove each of the thirteen feature families in turn, including family 12 (per-round pace and cardio) and family 13 (rating), and report the change in validation log loss. The feature-to-family map is the `families` entry of `data/features/features_meta.json`. If the level features are in the model they are ablated as a fourteenth group.
+- Feature ablation: remove each family the model reads in turn (families 1 to 13 and 15; family 14 is not a model input), including family 12 (per-round pace and cardio), family 13 (rating) and family 15 (age shape, all three of its columns together), and report the change in validation log loss. The feature-to-family map is the `families` entry of `data/features/features_meta.json`. If the optional level features are in the model they are ablated as one more group; a family's own swap-invariant column is removed with its family, not with that group.
 
 ## Model registry
 

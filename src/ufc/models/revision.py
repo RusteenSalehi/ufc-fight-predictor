@@ -48,7 +48,7 @@ from ufc.db.connection import connect
 from ufc.features.build import build_features
 from ufc.features.config import FeatureConfig
 from ufc.features.data import FeatureData, load_feature_data
-from ufc.features.matchup import CANDIDATE_FEATURES, CANDIDATE_LEVEL_NAMES
+from ufc.features.matchup import CANDIDATE_FEATURES, FAMILY_LEVELS, FEATURES
 from ufc.features.store import FittedParams
 from ufc.models import registry
 from ufc.models.baselines import ELO_SPEC, EloModel
@@ -118,11 +118,14 @@ class Variant:
 
 
 def _family(name: str) -> tuple[str, ...]:
-    return tuple(f.name for f in CANDIDATE_FEATURES if f.family == name)
+    """Antisymmetric columns of a family, adopted (``age_shape``, D58) or
+    still a candidate (``schedule``)."""
+    return tuple(f.name for f in (*FEATURES, *CANDIDATE_FEATURES) if f.family == name)
 
 
 _SCHEDULE = _family("schedule")
 _AGE_SHAPE = _family("age_shape")
+_AGE_SHAPE_LEVELS = tuple(lv.name for lv in FAMILY_LEVELS if lv.family == "age_shape")
 _CATCH = {"catch_weight_adjacent": True}
 
 VARIANTS: dict[str, Variant] = {
@@ -130,10 +133,10 @@ VARIANTS: dict[str, Variant] = {
     for v in (
         Variant("base"),
         Variant("schedule", _SCHEDULE),  # (a) family 14
-        Variant("age_shape", _AGE_SHAPE, CANDIDATE_LEVEL_NAMES),  # (b)
+        Variant("age_shape", _AGE_SHAPE, _AGE_SHAPE_LEVELS),  # (b)
         Variant("catch_weight", config=_CATCH),  # (c)
         Variant(
-            "combined", _SCHEDULE + _AGE_SHAPE, CANDIDATE_LEVEL_NAMES, _CATCH
+            "combined", _SCHEDULE + _AGE_SHAPE, _AGE_SHAPE_LEVELS, _CATCH
         ),  # a + b + c
     )
 }

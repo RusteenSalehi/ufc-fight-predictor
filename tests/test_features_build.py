@@ -22,8 +22,10 @@ from ufc.features.build import (
 from ufc.features.config import TRAIN_END, FeatureConfig
 from ufc.features.data import load_feature_data
 from ufc.features.matchup import (
+    ALL_LEVEL_NAMES,
     CANDIDATE_NAMES,
     FAMILIES,
+    FAMILY_LEVEL_NAMES,
     FEATURE_NAMES,
     FEATURES,
     FLAG_NAMES,
@@ -58,14 +60,14 @@ def test_one_row_per_bout_in_date_order_with_the_documented_columns(data, built)
         *CONTEXT_COLUMNS,
         *FLAG_NAMES,
         *FEATURE_NAMES,
-        *LEVEL_NAMES,
+        *ALL_LEVEL_NAMES,
         *CANDIDATE_NAMES,
     ]
     assert list(frame["bout_id"]) == [b.bout_id for b in data.bouts]
     assert frame["date"].is_monotonic_increasing
     assert frame["bout_id"].is_unique
     assert all(frame[name].dtype == "float64" for name in FEATURE_NAMES)
-    assert all(frame[name].dtype == "float64" for name in LEVEL_NAMES)
+    assert all(frame[name].dtype == "float64" for name in ALL_LEVEL_NAMES)
     assert all(frame[name].dtype == bool for name in FLAG_NAMES)
 
 
@@ -86,7 +88,8 @@ def test_label_is_from_fighter_a_side_and_missing_without_a_winner(data, built):
 def test_every_family_in_the_requirements_has_features():
     families = {f.family for f in FEATURES}
     assert families == set(FAMILIES)
-    assert len(FAMILIES) == 13
+    # Families 1 to 13 and family 15 (age shape); 14 is the unadopted schedule.
+    assert len(FAMILIES) == 14 and FAMILIES[-1] == "age_shape"
     by_family = {name: [f for f in FEATURES if f.family == name] for name in FAMILIES}
     assert all(by_family.values())
     assert {f.name for f in by_family["cardio"]} >= {
@@ -96,6 +99,13 @@ def test_every_family_in_the_requirements_has_features():
     # Family 13: the fighter's own rating, apart from who he has fought.
     assert [f.name for f in by_family["rating"]] == ["d_elo"]
     assert all("opp_elo" in f.name for f in by_family["opponent_quality"])
+    # Family 15: adopted in M4.5 (D58); its differences come after every M4
+    # column, the order the revision measured.
+    assert [f.name for f in by_family["age_shape"]] == [
+        "d_age_past_32",
+        "d_age_past_class_median",
+    ]
+    assert list(FEATURE_NAMES[-2:]) == ["d_age_past_32", "d_age_past_class_median"]
 
 
 def test_missing_stats_are_nan_and_flagged_never_zero(built):
@@ -124,7 +134,15 @@ def test_written_files_round_trip_and_rebuild_identically(data, built, tmp_path)
     assert meta["n_bouts"] == len(built.frame)
     assert [f["name"] for f in meta["features"]] == list(FEATURE_NAMES)
     assert list(meta["families"]) == list(FAMILIES)
-    assert sum(len(names) for names in meta["families"].values()) == len(FEATURES)
+    assert sum(len(names) for names in meta["families"].values()) == len(
+        FEATURES
+    ) + len(FAMILY_LEVEL_NAMES)
+    assert meta["families"]["age_shape"] == [
+        "d_age_past_32",
+        "d_age_past_class_median",
+        "lvl_age_rel_class",
+    ]
+    assert meta["family_level_features"] == list(FAMILY_LEVEL_NAMES)
     assert meta["families"]["rating"] == ["d_elo"]
     assert meta["level_features"] == list(LEVEL_NAMES)
     assert not set(LEVEL_NAMES) & {f["name"] for f in meta["features"]}
@@ -157,8 +175,9 @@ def test_feature_summary_counts_missing_values(built):
     summary = feature_summary(built.frame).set_index("feature")
     frame = built.frame
     established = ~(frame["a_debut"] | frame["b_debut"])
-    assert list(summary.index) == [*FEATURE_NAMES, *LEVEL_NAMES]
+    assert list(summary.index) == [*FEATURE_NAMES, *ALL_LEVEL_NAMES]
     assert set(summary.loc[list(LEVEL_NAMES), "family"]) == {"level"}
+    assert summary.loc["lvl_age_rel_class", "family"] == "age_shape"
     for name in ("d_slpm_career", "d_td_def_l3", "d_age", "d_n_fights", "lvl_age"):
         assert summary.loc[name, "missing"] == frame[name].isna().sum()
         assert (

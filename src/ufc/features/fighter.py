@@ -146,7 +146,7 @@ SCALARS: tuple[tuple[str, str], ...] = (
     ("losses_vs_higher", "schedule"),
     ("age_past_32", "age_shape"),
     ("age_past_class_median", "age_shape"),
-    ("age_rel_class", "aux"),  # source of a candidate level column
+    ("age_rel_class", "aux"),  # source of the age_shape level column
 )
 
 

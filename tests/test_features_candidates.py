@@ -19,7 +19,7 @@ from ufc.features.components import outcome_for
 from ufc.features.config import CATCH_WEIGHT, FeatureConfig, resolve_catch_weights
 from ufc.features.data import BoutFacts, FighterAttrs
 from ufc.features.fighter import POS, fighter_vector
-from ufc.features.matchup import FEATURE_NAMES, LEVEL_NAMES
+from ufc.features.matchup import FEATURE_NAMES, FEATURES, LEVEL_NAMES
 
 CW = CATCH_WEIGHT
 
@@ -185,17 +185,20 @@ def test_age_shape_values(built):
     assert row["d_age_past_32"] == a[POS["age_past_32"]] - b[POS["age_past_32"]]
 
 
-def test_candidates_leave_the_model_features_unchanged(data, built):
-    """The M4.5 columns are added beside the model features; the model
+def test_candidates_leave_the_m4_features_unchanged(data, built):
+    """The M4.5 columns are added beside the M4 model features; the M4
     features and level columns are what they were before the candidates
     existed (checked bit for bit on the real data during M4.5, and here by
-    building with parameters that lack age medians)."""
+    building with parameters that lack age medians). The age_shape family
+    was adopted later (D58) and is the only model family that reads them."""
     from dataclasses import replace
 
     no_medians = build_features(
         data, built.store.config, replace(built.params, age_medians=None)
     )
-    cols = [*FEATURE_NAMES, *LEVEL_NAMES]
+    m4 = [f.name for f in FEATURES if f.family != "age_shape"]
+    assert len(m4) == len(FEATURE_NAMES) - 2
+    cols = [*m4, *LEVEL_NAMES]
     pd.testing.assert_frame_equal(
         no_medians.frame[cols], built.frame[cols], check_exact=True
     )

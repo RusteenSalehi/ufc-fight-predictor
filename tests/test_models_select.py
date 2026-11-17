@@ -16,7 +16,7 @@ from tests.model_helpers import (
     synthetic_frame,
 )
 from ufc.models.calibrate import ISOTONIC, PLATT
-from ufc.models.design import labels
+from ufc.models.design import FeatureSpec, labels
 from ufc.models.evaluate import evaluate_period
 from ufc.models.gbm import LIBRARIES
 from ufc.models.metrics import log_loss
@@ -29,6 +29,7 @@ from ufc.models.select import (
     choose_shrinkage,
     search,
     select,
+    select_fixed,
     try_level_features,
 )
 from ufc.models.splits import (
@@ -441,3 +442,57 @@ def test_evaluate_period_counts_no_results_and_breaks_down(frames):
     assert record["equal_elo"] == int((scored["d_elo"] == 0).sum())
     with pytest.raises(ValueError, match="predictions for"):
         evaluate_period(frame, {"model": predictions["model"][:-1]}, primary="model")
+
+
+def test_a_fixed_recipe_adds_a_family_and_retunes_nothing(selection, splits_for):
+    """``select_fixed`` (D58): the parent's library, settings, half-life and
+    calibration method, the parent's inputs plus a new family, stages 1 to 3
+    carried over and marked. A family's symmetric column is removed with its
+    family in the ablation, not as part of the level group."""
+    chosen = selection.recipe
+    base = tuple(f for f in FEATURES if f != "d_reach_cm")
+    parent = Recipe(chosen.gbm, chosen.half_life_years, FeatureSpec(base), PLATT)
+    families = {
+        **{k: [f for f in v if f != "d_reach_cm"] for k, v in FAMILIES.items()},
+        "new": ["d_reach_cm", "lvl_age"],
+    }
+    spec = FeatureSpec((*base, "d_reach_cm"), ("lvl_age",))
+    splits = splits_for(selection.shrink_minutes)
+    fixed = select_fixed(
+        splits,
+        parent,
+        spec,
+        families,
+        selection.report,
+        "parent-v",
+        seeds=SMALL.seeds,
+        n_jobs=2,
+    )
+    report = fixed.report
+    json.dumps(report)
+    assert report["fixed_recipe"]["added_inputs"] == ["d_reach_cm", "lvl_age"]
+    assert fixed.recipe.gbm == parent.gbm
+    assert fixed.recipe.half_life_years == parent.half_life_years
+    assert fixed.recipe.calibration == PLATT
+    assert report["calibration"]["fixed_by_recipe"] == PLATT
+    assert fixed.recipe.spec == spec
+    assert fixed.shrink_minutes == selection.shrink_minutes
+    for stage in ("shrinkage", "levels", "search", "half_life"):
+        assert report[stage]["carried_over_from"] == "parent-v"
+    # The seed-averaged score is the recipe's own, refitted on every seed.
+    train, valid = _rows(splits, "test")
+    data = fit_data(train, valid, spec, parent.half_life_years, SPLIT_DATES.train_end)
+    again = score_variants([Variant("x", parent.gbm, data)], SMALL.seeds)["x"]
+    assert report["fixed_recipe"]["seed_mean_log_loss"] == again.log_loss
+    # The kept model is the recipe fitted once, as for any candidate.
+    model, _ = fit_recipe(fixed.recipe, train, valid, SPLIT_DATES.train_end)
+    assert model.model.n_trees == fixed.candidate.model.n_trees
+    ablation = {row["family"]: row for row in report["ablation"]["families"]}
+    assert set(ablation) == set(families)  # no separate level group
+    assert ablation["new"]["n_features"] == 2
+    assert splits.test_locked
+    # A fixed recipe may add inputs, never drop the parent's.
+    with pytest.raises(ValueError, match="drops"):
+        select_fixed(
+            splits, parent, FeatureSpec(base[1:]), families, selection.report, "p"
+        )

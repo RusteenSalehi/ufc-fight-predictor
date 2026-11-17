@@ -151,7 +151,8 @@ def _header(selection: Mapping, manifest: Mapping, config: Mapping) -> list[str]
         "",
         "## Features and fitted parameters",
         "",
-        f"{meta['n_features']} difference features in {len(meta['families'])} families: "
+        f"{sum(meta['families'].values())} features in {len(meta['families'])} "
+        "families: "
         + ", ".join(f"{name} {count}" for name, count in meta["families"].items())
         + ".",
         "",

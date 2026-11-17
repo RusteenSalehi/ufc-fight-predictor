@@ -8,8 +8,9 @@ to list first carries no information (docs/ML_REQUIREMENTS.md, "Symmetry").
 
 A few ``lvl_`` columns are the opposite: the mean of the two fighters' values,
 which swapping leaves exactly unchanged. They say what kind of bout it is (two
-veterans or two newcomers) and nothing about who is who. They are candidates:
-a model uses them only if they help on validation (docs/DECISIONS.md, D34).
+veterans or two newcomers) and nothing about who is who. ``LEVELS`` are a
+group a model uses only if it helps on validation (docs/DECISIONS.md, D34);
+``FAMILY_LEVELS`` belong to a numbered family and go wherever it goes (D58).
 
 The same function serves the historical build and a hypothetical upcoming
 bout, so training and prediction features cannot drift apart.
@@ -46,7 +47,10 @@ FAMILIES: tuple[str, ...] = (
     "debut",
     "cardio",
     "rating",
+    "age_shape",
 )
+"""Number 14 in the requirements is ``schedule``, a candidate that was not
+adopted; ``age_shape`` is family 15 (DECISIONS D58)."""
 
 
 class Pair(NamedTuple):
@@ -84,15 +88,26 @@ class Feature(NamedTuple):
     family: str
 
 
-CANDIDATE_FAMILIES: tuple[str, ...] = ("schedule", "age_shape")
-"""Families added by the M4.5 revision as candidates (D54, D55): "schedule"
-is the proposed family 14 (strength of schedule), "age_shape" the age-shape
-terms. Their columns are written to the feature table and to ``Matchup``,
-but they are not in ``FEATURES``: a model reads them only if its feature list
-names them, and ``train`` does not add them."""
+CANDIDATE_FAMILIES: tuple[str, ...] = ("schedule",)
+"""Families built as candidates (D54, D55): "schedule" is the proposed
+family 14 (strength of schedule), which M4.5 did not adopt (D56). Its columns
+are written to the feature table and to ``Matchup``, but they are not in
+``FEATURES``: a model reads them only if its feature list names them, and
+``train`` does not add them."""
 
-_DIFFED = [f for f in FIGHTER_FEATURES if f.family not in ("aux", *CANDIDATE_FAMILIES)]
+LATE_FAMILIES: tuple[str, ...] = ("age_shape",)
+"""Families adopted after M4. Their difference columns come after every M4
+column, so the adopted model reads its inputs in the order the M4.5 revision
+measured them (D58)."""
+
+_DIFFED = [
+    f
+    for f in FIGHTER_FEATURES
+    if f.family not in ("aux", *CANDIDATE_FAMILIES, *LATE_FAMILIES)
+]
 _DIFF_IDX = np.array([POS[f.name] for f in _DIFFED])
+_LATE = [f for f in FIGHTER_FEATURES if f.family in LATE_FAMILIES]
+_LATE_IDX = np.array([POS[f.name] for f in _LATE], dtype=int)
 _OFFENSE_IDX = np.array([POS[p.offense] for p in PAIRS])
 _DEFENSE_IDX = np.array([POS[p.defense] for p in PAIRS])
 _COMPLEMENT = np.array([p.complement for p in PAIRS])
@@ -100,6 +115,7 @@ _COMPLEMENT = np.array([p.complement for p in PAIRS])
 FEATURES: tuple[Feature, ...] = (
     *(Feature(f"d_{f.name}", f.family) for f in _DIFFED),
     *(Feature(f"d_{p.name}", p.family) for p in PAIRS),
+    *(Feature(f"d_{f.name}", f.family) for f in _LATE),
 )
 """Model features, in column order. All are A-minus-B and start with ``d_``."""
 
@@ -127,7 +143,6 @@ _PROFILE_IDX = np.array(
     [POS[n] for n in ("height_cm", "reach_cm", "stance_orthodox", "age")]
 )
 
-assert {f.family for f in FEATURES} == set(FAMILIES)
 
 SHRUNK_FEATURE_NAMES: tuple[str, ...] = (
     *(f"d_{f.name}" for f in _DIFFED if f.name in TIME_RATE_FEATURES),
@@ -138,10 +153,12 @@ no others."""
 
 
 class Level(NamedTuple):
-    """The mean of the two fighters' ``source`` values."""
+    """The mean of the two fighters' ``source`` values. ``family`` is set for
+    a level column that belongs to a numbered family."""
 
     name: str
     source: str
+    family: str | None = None
 
 
 LEVELS: tuple[Level, ...] = (
@@ -151,35 +168,53 @@ LEVELS: tuple[Level, ...] = (
 )
 LEVEL_NAMES: tuple[str, ...] = tuple(level.name for level in LEVELS)
 """Swap-invariant columns, written after the ``d_`` features. Not part of
-``FEATURES`` or of any family; a model opts in to them by name."""
+``FEATURES`` or of any family; a model opts in to them by name, as a group."""
 
-_LEVEL_IDX = np.array([POS[level.source] for level in LEVELS])
+FAMILY_LEVELS: tuple[Level, ...] = (
+    Level("lvl_age_rel_class", "age_rel_class", "age_shape"),
+)
+FAMILY_LEVEL_NAMES: tuple[str, ...] = tuple(lv.name for lv in FAMILY_LEVELS)
+"""Swap-invariant columns that belong to a family, written after
+``LEVEL_NAMES``. ``lvl_age_rel_class`` is the bout's mean age minus the
+class's median age: an old bout for its division. (The difference of the two
+fighters' ages relative to the median would be exactly ``d_age``: the median
+is the same for both.)"""
+
+ALL_LEVEL_NAMES: tuple[str, ...] = (*LEVEL_NAMES, *FAMILY_LEVEL_NAMES)
+"""Every swap-invariant column, in table order: ``Matchup.levels`` keys."""
+
+_LEVEL_IDX = np.array([POS[level.source] for level in (*LEVELS, *FAMILY_LEVELS)])
+
+FAMILY_MEMBERS: dict[str, tuple[str, ...]] = {
+    family: (
+        *(f.name for f in FEATURES if f.family == family),
+        *(lv.name for lv in FAMILY_LEVELS if lv.family == family),
+    )
+    for family in FAMILIES
+}
+"""Every model column of each family, antisymmetric first. The ablation
+removes a family's columns together."""
+
+assert {f.family for f in FEATURES} == set(FAMILIES)
+assert {lv.family for lv in FAMILY_LEVELS} <= set(FAMILIES)
 
 _CANDIDATE_DIFFED = [f for f in FIGHTER_FEATURES if f.family in CANDIDATE_FAMILIES]
-_CANDIDATE_DIFF_IDX = np.array([POS[f.name] for f in _CANDIDATE_DIFFED])
+_CANDIDATE_DIFF_IDX = np.array([POS[f.name] for f in _CANDIDATE_DIFFED], dtype=int)
 CANDIDATE_FEATURES: tuple[Feature, ...] = tuple(
     Feature(f"d_{f.name}", f.family) for f in _CANDIDATE_DIFFED
 )
 CANDIDATE_FEATURE_NAMES: tuple[str, ...] = tuple(f.name for f in CANDIDATE_FEATURES)
 """Antisymmetric candidate columns (A minus B), written after the level
 columns."""
-
-CANDIDATE_LEVELS: tuple[Level, ...] = (Level("lvl_age_rel_class", "age_rel_class"),)
-CANDIDATE_LEVEL_NAMES: tuple[str, ...] = tuple(lv.name for lv in CANDIDATE_LEVELS)
-"""Swap-invariant candidate columns, written last. ``lvl_age_rel_class`` is
-the bout's mean age minus the class's median age: an old bout for its
-division. (The difference of the two fighters' ages relative to the median
-would be exactly ``d_age``: the median is the same for both.)"""
-_CANDIDATE_LEVEL_IDX = np.array([POS[lv.source] for lv in CANDIDATE_LEVELS])
-CANDIDATE_NAMES: tuple[str, ...] = (*CANDIDATE_FEATURE_NAMES, *CANDIDATE_LEVEL_NAMES)
+CANDIDATE_NAMES: tuple[str, ...] = CANDIDATE_FEATURE_NAMES
 
 
 class MatchupArrays(NamedTuple):
     a: np.ndarray  # fighter A's own values, in FIGHTER_FEATURES order
     b: np.ndarray
     features: np.ndarray  # FEATURES order; negated when the fighters swap
-    levels: np.ndarray  # LEVELS order; unchanged when the fighters swap
-    candidates: np.ndarray  # CANDIDATE_NAMES order: differences, then levels
+    levels: np.ndarray  # ALL_LEVEL_NAMES order; unchanged when the fighters swap
+    candidates: np.ndarray  # CANDIDATE_NAMES order; negated when they swap
 
 
 def _pair_values(offense: np.ndarray, defense: np.ndarray) -> np.ndarray:
@@ -200,17 +235,16 @@ def matchup_arrays(
     a = fighter_vector(store, fighter_a_id, ordinal, weight_class)
     b = fighter_vector(store, fighter_b_id, ordinal, weight_class)
     features = np.concatenate(
-        (a[_DIFF_IDX] - b[_DIFF_IDX], _pair_values(a, b) - _pair_values(b, a))
+        (
+            a[_DIFF_IDX] - b[_DIFF_IDX],
+            _pair_values(a, b) - _pair_values(b, a),
+            a[_LATE_IDX] - b[_LATE_IDX],
+        )
     )
     # a + b and b + a are the same floating-point number, so this is exactly
     # the same whichever fighter is listed first.
     levels = (a[_LEVEL_IDX] + b[_LEVEL_IDX]) / 2.0
-    candidates = np.concatenate(
-        (
-            a[_CANDIDATE_DIFF_IDX] - b[_CANDIDATE_DIFF_IDX],
-            (a[_CANDIDATE_LEVEL_IDX] + b[_CANDIDATE_LEVEL_IDX]) / 2.0,
-        )
-    )
+    candidates = a[_CANDIDATE_DIFF_IDX] - b[_CANDIDATE_DIFF_IDX]
     return MatchupArrays(a, b, features, levels, candidates)
 
 
@@ -273,7 +307,7 @@ def build_matchup(
         date=on,
         weight_class=weight_class,
         features=dict(zip(FEATURE_NAMES, features.tolist(), strict=True)),
-        levels=dict(zip(LEVEL_NAMES, levels.tolist(), strict=True)),
+        levels=dict(zip(ALL_LEVEL_NAMES, levels.tolist(), strict=True)),
         flags=dict(zip(FLAG_NAMES, flags_from(a, b), strict=True)),
         a=dict(zip(names, a.tolist(), strict=True)),
         b=dict(zip(names, b.tolist(), strict=True)),

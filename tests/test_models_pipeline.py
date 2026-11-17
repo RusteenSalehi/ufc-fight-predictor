@@ -16,7 +16,7 @@ from tests.feature_helpers import random_league
 from tests.model_helpers import FAST, SMALL
 from ufc.features.build import FEATURES_FILE, build_features, fit_params
 from ufc.features.config import FeatureConfig
-from ufc.features.matchup import FEATURE_NAMES
+from ufc.features.matchup import FAMILIES, FEATURE_NAMES
 from ufc.models import __main__ as cli
 from ufc.models import registry
 from ufc.models.calibrate import PLATT
@@ -210,7 +210,15 @@ def test_train_saves_a_candidate_and_writes_the_selection_record(workspace):
         "ablation.png",
     }
     assert set(selection["ablation"]["families"][0]) >= {"family", "delta", "helped"}
-    assert len(selection["ablation"]["families"]) == 13
+    # Every numbered family (age_shape's level column with its family), and
+    # the level group only if it was kept.
+    groups = [r["family"] for r in selection["ablation"]["families"]]
+    expected = [*FAMILIES, *(["level"] if selection["levels"]["kept"] else [])]
+    assert groups == expected
+    age_shape = next(
+        r for r in selection["ablation"]["families"] if r["family"] == "age_shape"
+    )
+    assert age_shape["n_features"] == 3
 
 
 def test_train_does_not_evaluate_the_test_period_or_approve_anything(workspace):
@@ -391,3 +399,75 @@ def test_a_refit_cannot_be_evaluated_or_refitted_again(refitted, capsys):
 def test_refit_again_gives_the_same_version(refitted, capsys):
     assert cli.main(refitted["refit_args"]) == 0
     assert "already there, unchanged" in capsys.readouterr().out
+
+
+# --- a fixed recipe with today's families (D58) -----------------------------------
+
+
+@pytest.fixture(scope="module")
+def fixed(refitted):
+    """``train --recipe-of`` the workspace's candidate into a second reports
+    directory, then evaluate it there."""
+    root = refitted["root"]
+    parent = refitted["selection"]["version"]
+    reports, features = root / "reports_fixed", root / "features_fixed"
+    common = ["--models", str(refitted["models"]), "--reports", str(reports)]
+    inputs = ["--db", str(refitted["db"]), "--features", str(features), "--jobs", "2"]
+    train = [
+        "train",
+        *common,
+        *inputs,
+        "--recipe-of",
+        parent,
+        "--parent-reports",
+        str(refitted["reports"]),
+    ]
+    patch = pytest.MonkeyPatch()
+    patch.setattr(cli, "SETTINGS", SMALL)
+    patch.setattr(cli, "FIRST_YEAR", 2024)
+    try:
+        assert cli.main(train) == 0
+        selection = json.loads((reports / cli.SELECTION_FILE).read_text())
+    finally:
+        patch.undo()
+    return {**refitted, "parent": parent, "fixed": selection}
+
+
+def test_a_fixed_recipe_with_nothing_added_reproduces_its_parent(fixed):
+    parent, selection = fixed["parent"], fixed["fixed"]
+    version = selection["version"]
+    assert version != parent  # the record of how it was made differs
+    new, _ = registry.load_candidate(fixed["models"], version)
+    old, _ = registry.load_candidate(fixed["models"], parent)
+    assert new.recipe == old.recipe
+    assert new.model.n_trees == old.model.n_trees
+    assert new.calibrator.slope == old.calibrator.slope
+    assert selection["fixed_recipe"]["parent"] == parent
+    assert selection["fixed_recipe"]["added_inputs"] == []
+    # Same recipe, same seeds: the same validation score as the parent's.
+    assert (
+        selection["versus_baselines"]["candidate_log_loss"]
+        == fixed["selection"]["versus_baselines"]["candidate_log_loss"]
+    )
+    for stage in ("shrinkage", "levels", "search", "half_life"):
+        assert selection[stage]["carried_over_from"] == parent
+        carried = {
+            k: v for k, v in selection[stage].items() if k != "carried_over_from"
+        }
+        assert carried == fixed["selection"][stage]
+    config = registry.read_json(fixed["models"], version, "config.json")
+    assert config["fixed_recipe"]["parent"] == parent
+
+
+def test_a_fixed_recipe_needs_its_parents_selection_record(fixed, tmp_path, capsys):
+    refit_version = fixed["refit"]["version"]
+    common = ["--models", str(fixed["models"]), "--reports", str(tmp_path)]
+    inputs = ["--db", str(fixed["db"]), "--features", str(tmp_path / "f")]
+    # The record in --parent-reports belongs to another version.
+    args = ["train", *common, *inputs, "--recipe-of", fixed["fixed"]["version"]]
+    assert cli.main([*args, "--parent-reports", str(fixed["reports"])]) == 1
+    assert "records" in capsys.readouterr().err
+    # A refit is not a candidate.
+    args = ["train", *common, *inputs, "--recipe-of", refit_version]
+    assert cli.main(args) == 1
+    assert "is a refit" in capsys.readouterr().err

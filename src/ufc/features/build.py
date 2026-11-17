@@ -24,12 +24,13 @@ from ufc.features.config import FeatureConfig
 from ufc.features.data import BoutFacts, FeatureData, FighterAttrs
 from ufc.features.elo import EloFit, by_date, fit_elo_params
 from ufc.features.matchup import (
+    ALL_LEVEL_NAMES,
     CANDIDATE_FAMILIES,
     CANDIDATE_FEATURE_NAMES,
     CANDIDATE_FEATURES,
-    CANDIDATE_LEVEL_NAMES,
     CANDIDATE_NAMES,
-    FAMILIES,
+    FAMILY_LEVELS,
+    FAMILY_MEMBERS,
     FEATURE_NAMES,
     FEATURES,
     FLAG_NAMES,
@@ -167,8 +168,8 @@ def build_features(
         columns=list(FEATURE_NAMES),
     )
     level_frame = pd.DataFrame(
-        np.array(levels).reshape(len(levels), len(LEVEL_NAMES)),
-        columns=list(LEVEL_NAMES),
+        np.array(levels).reshape(len(levels), len(ALL_LEVEL_NAMES)),
+        columns=list(ALL_LEVEL_NAMES),
     )
     candidate_frame = pd.DataFrame(
         np.array(candidates).reshape(len(candidates), len(CANDIDATE_NAMES)),
@@ -208,6 +209,7 @@ def feature_summary(frame: pd.DataFrame) -> pd.DataFrame:
     established = ~(frame["a_debut"] | frame["b_debut"])
     columns = [(f.name, f.family) for f in FEATURES]
     columns += [(name, LEVEL_FAMILY) for name in LEVEL_NAMES]
+    columns += [(lv.name, lv.family) for lv in FAMILY_LEVELS]
     return pd.DataFrame(
         {
             "feature": [name for name, _ in columns],
@@ -235,16 +237,13 @@ def build_meta(build: FeatureBuild, source_commit: str | None) -> dict:
         "context_columns": list(CONTEXT_COLUMNS),
         "flag_columns": list(FLAG_NAMES),
         "features": [{"name": f.name, "family": f.family} for f in FEATURES],
-        "families": {
-            family: [f.name for f in FEATURES if f.family == family]
-            for family in FAMILIES
-        },
+        "families": {family: list(names) for family, names in FAMILY_MEMBERS.items()},
         "level_features": list(LEVEL_NAMES),
+        "family_level_features": [lv.name for lv in FAMILY_LEVELS],
         "candidate_families": {
             family: [f.name for f in CANDIDATE_FEATURES if f.family == family]
             for family in CANDIDATE_FAMILIES
         },
-        "candidate_level_features": list(CANDIDATE_LEVEL_NAMES),
         "shrunk_features": list(SHRUNK_FEATURE_NAMES),
     }
     if build.elo_fit is not None:

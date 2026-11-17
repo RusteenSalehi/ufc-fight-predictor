@@ -6,6 +6,11 @@
 4. Calibration method, by cross-validation inside validation.
 5. Feature-family ablation of the selected recipe.
 
+``select_fixed`` is the other entry point: a recipe fixed in advance (a
+recorded candidate's settings with an adopted family added, D58) gets the
+same baselines, calibration, validation scores and ablation, and stages 1 to
+3 are carried over from that candidate's record and marked as such.
+
 Feature choices come first and use settings fixed in advance, so the search
 cannot tilt them toward the option it happened to be tuned on. Every stage
 asserts that the test period is still locked, and gets its rows from
@@ -57,6 +62,14 @@ two of them, four of them."""
 
 FINAL_SEED = 0
 LEVEL_GROUP = "level"
+CARRIED_STAGES: tuple[str, ...] = ("shrinkage", "levels", "search", "half_life")
+"""Stages ``select_fixed`` does not rerun: their records are the parent's."""
+
+
+def add_levels(spec: FeatureSpec, level_names: Sequence[str]) -> FeatureSpec:
+    """``spec`` with the level group added in front of any symmetric columns
+    that belong to a family, the order the M4.5 revision measured (D58)."""
+    return FeatureSpec(spec.antisymmetric, (*level_names, *spec.symmetric))
 
 
 def _rows(splits: Splits, stage: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -246,7 +259,7 @@ def try_level_features(
     variants = []
     for label, option in (
         ("without", spec),
-        ("with", spec.with_symmetric(level_names)),
+        ("with", add_levels(spec, level_names)),
     ):
         data = fit_data(train, valid, option, None, splits.dates.train_end)
         variants += [
@@ -409,8 +422,10 @@ def ablate(
     groups = {
         name: [f for f in members if f in used] for name, members in families.items()
     }
-    if recipe.spec.symmetric:
-        groups[LEVEL_GROUP] = list(recipe.spec.symmetric)
+    in_a_family = {f for members in families.values() for f in members}
+    levels = [f for f in recipe.spec.symmetric if f not in in_a_family]
+    if levels:
+        groups[LEVEL_GROUP] = levels
     variants = [
         Variant(
             "full",
@@ -502,11 +517,16 @@ def select(
     level_names: Sequence[str],
     shrunk_features: Sequence[str],
     *,
+    family_levels: Sequence[str] = (),
     settings: SelectionSettings | None = None,
     n_jobs: int = 1,
 ) -> Selection:
     """Run every stage and return the frozen recipe, the fitted candidate and
-    a JSON-ready record of every comparison that was made."""
+    a JSON-ready record of every comparison that was made.
+
+    ``features`` are antisymmetric; ``family_levels`` are symmetric columns
+    that belong to a family and are always read; ``level_names`` are the
+    optional level group, kept only if it helps."""
     settings = settings or SelectionSettings()
     shrink_grid, seeds, half_lives = (
         settings.shrink_grid,
@@ -514,7 +534,7 @@ def select(
         settings.half_lives,
     )
     n_trials, top_k = settings.n_trials, settings.top_k
-    base = FeatureSpec(tuple(features))
+    base = FeatureSpec(tuple(features), tuple(family_levels))
     report: dict = {"seeds": list(seeds), "reference_params": REFERENCE}
 
     report["shrinkage"] = choose_shrinkage(
@@ -522,7 +542,7 @@ def select(
     )
     shrink_minutes = report["shrinkage"]["chosen"]
     splits = splits_for(shrink_minutes)
-    train, valid = _rows(splits, "selection")
+    splits.assert_test_locked("selection")
     report["splits"] = splits.dates.to_dict()
     for name, rows in (("train", splits.train()), ("validation", splits.valid())):
         report[f"n_{name}_bouts"] = len(rows)
@@ -530,7 +550,7 @@ def select(
     report["attribute_gap"] = attribute_gap_record(splits)
 
     report["levels"] = try_level_features(splits, base, level_names, seeds, n_jobs)
-    spec = base.with_symmetric(level_names) if report["levels"]["kept"] else base
+    spec = add_levels(base, level_names) if report["levels"]["kept"] else base
 
     report["search"] = search(splits, spec, n_trials, top_k, seeds, n_jobs)
     params = {
@@ -543,6 +563,41 @@ def select(
     half_life = report["half_life"]["half_life_years"]
     selected = scores[f"{library}|{_half_life_label(half_life)}"]
 
+    recipe, candidate, c = _finish(
+        splits,
+        report,
+        spec,
+        library,
+        params[library],
+        half_life,
+        selected,
+        families,
+        seeds,
+        n_jobs,
+    )
+    return Selection(recipe, candidate, shrink_minutes, c, report)
+
+
+def _finish(
+    splits: Splits,
+    report: dict,
+    spec: FeatureSpec,
+    library: str,
+    params: Mapping[str, float],
+    half_life: float | None,
+    selected: Score,
+    families: Mapping[str, Sequence[str]],
+    seeds: Sequence[int],
+    n_jobs: int,
+    fixed_calibration: str | None = None,
+) -> tuple[Recipe, Candidate, float]:
+    """Baselines, calibration, the kept model, validation scores and the
+    ablation, for a recipe whose library, settings, half-life and inputs are
+    decided. ``selected`` is that recipe's seed-averaged validation score.
+    With ``fixed_calibration`` the method is the recipe's; the comparison is
+    still run and recorded."""
+    train, valid = _rows(splits, "selection")
+    shrink_minutes = report["shrinkage"]["chosen"]
     logistic, report["logistic"] = tune_logistic(train, valid, spec)
     valid_y = labels(valid)
     baselines = baseline_predictions(train, valid, spec, logistic.c)
@@ -563,12 +618,21 @@ def select(
     }
 
     # The model that is kept: one seed, trees by early stopping on validation.
-    gbm = GbmConfig(library, params[library], FINAL_SEED)
+    gbm = GbmConfig(library, dict(params), FINAL_SEED)
     draft = Recipe(gbm, half_life, spec, IDENTITY)
     _, p_valid = fit_recipe(draft, train, valid, splits.dates.train_end)
     calibration = choose_method(p_valid, valid_y, valid["date"].to_numpy())
     cross_validated = calibration.pop("predictions")
-    recipe = Recipe(gbm, half_life, spec, calibration["chosen"])
+    if fixed_calibration is not None:
+        calibration["fixed_by_recipe"] = fixed_calibration
+        if calibration["chosen"] != fixed_calibration:
+            logger.warning(
+                "cross-validation prefers %s; the fixed recipe keeps %s",
+                calibration["chosen"],
+                fixed_calibration,
+            )
+    method = fixed_calibration or calibration["chosen"]
+    recipe = Recipe(gbm, half_life, spec, method)
     candidate, p_again = fit_recipe(recipe, train, valid, splits.dates.train_end)
     assert np.array_equal(p_again, p_valid), "refitting the recipe changed the model"
     calibration["slope"] = candidate.calibrator.slope
@@ -599,4 +663,73 @@ def select(
 
     report["ablation"] = ablate(splits, recipe, families, seeds, n_jobs)
     splits.assert_test_locked("selection")
-    return Selection(recipe, candidate, shrink_minutes, logistic.c, report)
+    return recipe, candidate, logistic.c
+
+
+def select_fixed(
+    splits: Splits,
+    parent: Recipe,
+    spec: FeatureSpec,
+    families: Mapping[str, Sequence[str]],
+    carried: Mapping,
+    parent_version: str,
+    *,
+    seeds: Sequence[int] = SEEDS,
+    n_jobs: int = 1,
+) -> Selection:
+    """A candidate with ``parent``'s library, settings, half-life and
+    calibration method, reading ``spec``. Nothing is re-tuned: the number of
+    trees is chosen by early stopping on validation and the calibrator is
+    fitted on validation, as for any candidate.
+
+    ``carried`` is the parent's selection record; its stages 1 to 3 are
+    copied, marked as carried over, because they were not rerun. ``splits``
+    must be built with the parent's shrinkage strength.
+    """
+    missing = set(parent.spec.names) - set(spec.names)
+    if missing:
+        raise ValueError(
+            f"the fixed recipe drops the parent's inputs: {sorted(missing)}"
+        )
+    report: dict = {
+        "seeds": list(seeds),
+        "reference_params": REFERENCE,
+        "fixed_recipe": {
+            "parent": parent_version,
+            "added_inputs": [n for n in spec.names if n not in set(parent.spec.names)],
+            "carried_stages": list(CARRIED_STAGES),
+            "note": (
+                "library, settings, half-life, shrinkage, level features and "
+                "calibration method are the parent's; the carried stages were "
+                "run for the parent's inputs and are not rerun"
+            ),
+        },
+    }
+    for stage in CARRIED_STAGES:
+        report[stage] = {**carried[stage], "carried_over_from": parent_version}
+    train, valid = _rows(splits, "selection")
+    report["splits"] = splits.dates.to_dict()
+    for name, rows in (("train", splits.train()), ("validation", splits.valid())):
+        report[f"n_{name}_bouts"] = len(rows)
+        report[f"n_{name}_scored"] = int(rows["label"].notna().sum())
+    report["attribute_gap"] = attribute_gap_record(splits)
+
+    data = fit_data(train, valid, spec, parent.half_life_years, splits.dates.train_end)
+    selected = score_variants([Variant("selected", parent.gbm, data)], seeds, n_jobs)[
+        "selected"
+    ]
+    report["fixed_recipe"]["seed_mean_log_loss"] = selected.log_loss
+    recipe, candidate, c = _finish(
+        splits,
+        report,
+        spec,
+        parent.gbm.library,
+        parent.gbm.params,
+        parent.half_life_years,
+        selected,
+        families,
+        seeds,
+        n_jobs,
+        fixed_calibration=parent.calibration,
+    )
+    return Selection(recipe, candidate, report["shrinkage"]["chosen"], c, report)

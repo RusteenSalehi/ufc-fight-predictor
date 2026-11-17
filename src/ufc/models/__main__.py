@@ -1,6 +1,9 @@
 """Command line for model selection, evaluation and the report.
 
 uv run python -m ufc.models train       select on validation, save the candidate
+uv run python -m ufc.models train --recipe-of VERSION
+                                        the same, with VERSION's recipe fixed and
+                                        the current feature families (D58)
 uv run python -m ufc.models evaluate    score the saved candidate on the test period
 uv run python -m ufc.models report      write the generated part of docs/MODEL_REPORT.md
 uv run python -m ufc.models refit       refit the candidate's recipe on all data (D47)
@@ -34,14 +37,27 @@ from ufc.features.build import (
 )
 from ufc.features.config import FeatureConfig
 from ufc.features.data import FeatureData, load_feature_data
-from ufc.features.matchup import FEATURE_NAMES, LEVEL_NAMES, SHRUNK_FEATURE_NAMES
+from ufc.features.matchup import (
+    FAMILY_LEVEL_NAMES,
+    FEATURE_NAMES,
+    LEVEL_NAMES,
+    SHRUNK_FEATURE_NAMES,
+)
 from ufc.models import plots, registry
+from ufc.models.design import FeatureSpec
 from ufc.models.evaluate import evaluate_period
 from ufc.models.gbm import MAX_TREES, PATIENCE
 from ufc.models.refit import STATUS as REFIT_STATUS
 from ufc.models.refit import compare_predictions, refit, schema_check, symmetry_check
 from ufc.models.report import write_report
-from ufc.models.select import SelectionSettings, baseline_predictions, select
+from ufc.models.select import (
+    Selection,
+    SelectionSettings,
+    add_levels,
+    baseline_predictions,
+    select,
+    select_fixed,
+)
 from ufc.models.splits import (
     SPLIT_DATES,
     Splits,
@@ -93,6 +109,8 @@ def feature_config_from(meta: dict) -> FeatureConfig:
 
 
 def run_train(args: argparse.Namespace) -> int:
+    if args.recipe_of:
+        return run_train_fixed(args)
     data = _load_data(args.db)
     if data is None:
         return 1
@@ -117,14 +135,90 @@ def run_train(args: argparse.Namespace) -> int:
         meta["families"],
         LEVEL_NAMES,
         SHRUNK_FEATURE_NAMES,
+        family_levels=FAMILY_LEVEL_NAMES,
         settings=SETTINGS,
         n_jobs=args.jobs,
     )
-    chosen = builds[selection.shrink_minutes]
+    return _save_selection(
+        args,
+        data,
+        selection,
+        builds[selection.shrink_minutes],
+        splits[selection.shrink_minutes],
+        meta,
+    )
+
+
+def run_train_fixed(args: argparse.Namespace) -> int:
+    """A candidate with a recorded candidate's recipe and today's feature
+    families: nothing re-tuned, trees and calibrator fitted on validation
+    (DECISIONS D58). Stages 1 to 3 of the selection record are carried over
+    from the parent's, read from ``--parent-reports`` (default
+    ``--reports``)."""
+    parent_version = args.recipe_of
+    parent, parent_manifest = registry.load_candidate(args.models, parent_version)
+    if registry.is_refit(parent_manifest):
+        print(f"{parent_version} is a refit; name a candidate.", file=sys.stderr)
+        return 1
+    carried_path = (args.parent_reports or args.reports) / SELECTION_FILE
+    carried = json.loads(carried_path.read_text())
+    if carried["version"] != parent_version:
+        print(
+            f"{carried_path} records {carried['version']}, not {parent_version}.",
+            file=sys.stderr,
+        )
+        return 1
+    parent_config = registry.read_json(args.models, parent_version, "config.json")
+    parent_pipeline = registry.read_json(
+        args.models, parent_version, "feature_pipeline.json"
+    )
+    data = _load_data(args.db)
+    if data is None:
+        return 1
+
+    build = build_features(data, feature_config_from(parent_pipeline))
+    splits = Splits(development_only(build.frame))
+    # The parent's inputs must come out of today's build unchanged.
+    upto = build.frame[
+        build.frame["date"] <= pd.Timestamp(parent_pipeline["last_date"])
+    ]
+    if (
+        registry.dataset_hash(upto, parent.spec)
+        != parent_manifest["dataset"]["feature_table_sha256"]
+    ):
+        print(
+            f"Today's build does not reproduce {parent_version}'s inputs.",
+            file=sys.stderr,
+        )
+        return 1
+    meta = build_meta(build, data.source_commit)
+    base = FeatureSpec(FEATURE_NAMES, FAMILY_LEVEL_NAMES)
+    spec = add_levels(base, LEVEL_NAMES) if carried["levels"]["kept"] else base
+    selection = select_fixed(
+        splits,
+        parent.recipe,
+        spec,
+        meta["families"],
+        carried,
+        parent_version,
+        seeds=SETTINGS.seeds,
+        n_jobs=args.jobs,
+    )
+    assert selection.shrink_minutes == parent_config["shrink_minutes"]
+    return _save_selection(args, data, selection, build, splits, meta)
+
+
+def _save_selection(
+    args: argparse.Namespace,
+    data: FeatureData,
+    selection: Selection,
+    chosen,
+    kept: Splits,
+    meta: dict,
+) -> int:
     features_path, meta_path = write_features(chosen, args.features, data.source_commit)
     chosen_meta = json.loads(meta_path.read_text())
 
-    kept = splits[selection.shrink_minutes]
     kept.assert_test_locked("saving the candidate")
     spec = selection.recipe.spec
     train, valid = fit_rows(kept.train()), labelled(kept.valid())
@@ -138,6 +232,8 @@ def run_train(args: argparse.Namespace) -> int:
         "baseline_logistic_c": selection.logistic_c,
         "selection": {**SETTINGS.to_dict(), "search_space": SEARCH_SPACE},
     }
+    if "fixed_recipe" in selection.report:
+        config["fixed_recipe"] = selection.report["fixed_recipe"]
     report = selection.report
     saved = registry.save_candidate(
         args.models,
@@ -164,7 +260,7 @@ def run_train(args: argparse.Namespace) -> int:
     report["version"] = saved.version
     report["source_commit"] = data.source_commit
     report["feature_meta"] = {
-        "n_features": len(FEATURE_NAMES),
+        "n_features": len(spec.names),
         "families": {name: len(members) for name, members in meta["families"].items()},
         "elo": chosen_meta["params"]["elo"],
         "elo_fit": chosen_meta.get("elo_fit"),
@@ -544,6 +640,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     common(train)
     inputs(train)
+    train.add_argument(
+        "--recipe-of",
+        metavar="VERSION",
+        help="keep this candidate's recipe and add today's feature families; "
+        "nothing is re-tuned (D58)",
+    )
+    train.add_argument(
+        "--parent-reports",
+        type=Path,
+        help="where the parent's selection.json is (default: --reports)",
+    )
     evaluate = commands.add_parser(
         "evaluate", help="score the saved candidate on the test period, once"
     )

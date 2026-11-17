@@ -22,9 +22,10 @@ from tests.feature_helpers import (
 from ufc.features.build import CONTEXT_COLUMNS, build_features, mirror
 from ufc.features.config import FeatureConfig
 from ufc.features.matchup import (
+    ALL_LEVEL_NAMES,
     CANDIDATE_FEATURE_NAMES,
-    CANDIDATE_LEVEL_NAMES,
     CANDIDATE_NAMES,
+    FAMILY_LEVEL_NAMES,
     FEATURE_NAMES,
     FEATURES,
     FLAG_NAMES,
@@ -66,19 +67,17 @@ def test_swapping_fighters_negates_every_difference_feature_exactly(built):
         backward = np.array([ba.features[n] for n in FEATURE_NAMES])
         # Exact equality; NaN matches NaN.
         np.testing.assert_array_equal(forward, -backward)
-        # Level columns are means of the two fighters: exactly unchanged.
+        # Level columns are means of the two fighters: exactly unchanged,
+        # the age_shape family's level column included.
+        assert list(ab.levels) == list(ALL_LEVEL_NAMES)
         np.testing.assert_array_equal(
-            np.array([ab.levels[n] for n in LEVEL_NAMES]),
-            np.array([ba.levels[n] for n in LEVEL_NAMES]),
+            np.array([ab.levels[n] for n in ALL_LEVEL_NAMES]),
+            np.array([ba.levels[n] for n in ALL_LEVEL_NAMES]),
         )
-        # M4.5 candidates: differences negate, the level column does not move.
+        # Candidates are differences: they negate.
         np.testing.assert_array_equal(
             np.array([ab.candidates[n] for n in CANDIDATE_FEATURE_NAMES]),
             -np.array([ba.candidates[n] for n in CANDIDATE_FEATURE_NAMES]),
-        )
-        np.testing.assert_array_equal(
-            np.array([ab.candidates[n] for n in CANDIDATE_LEVEL_NAMES]),
-            np.array([ba.candidates[n] for n in CANDIDATE_LEVEL_NAMES]),
         )
         # Each fighter's own values do not depend on which side he is on.
         assert _same_values(ab.a, ba.b) and _same_values(ab.b, ba.a)
@@ -124,16 +123,11 @@ def test_mirror_swaps_flags_and_labels_and_is_its_own_inverse(built):
     assert (mirrored.loc[labelled, "label"] == 1 - frame.loc[labelled, "label"]).all()
     assert mirrored.loc[~labelled, "label"].isna().all()
     pd.testing.assert_frame_equal(
-        mirrored[list(LEVEL_NAMES)], frame[list(LEVEL_NAMES)], check_exact=True
+        mirrored[list(ALL_LEVEL_NAMES)], frame[list(ALL_LEVEL_NAMES)], check_exact=True
     )
     assert mirrored[list(FEATURE_NAMES)].equals(-frame[list(FEATURE_NAMES)])
     assert mirrored[list(CANDIDATE_FEATURE_NAMES)].equals(
         -frame[list(CANDIDATE_FEATURE_NAMES)]
-    )
-    pd.testing.assert_frame_equal(
-        mirrored[list(CANDIDATE_LEVEL_NAMES)],
-        frame[list(CANDIDATE_LEVEL_NAMES)],
-        check_exact=True,
     )
     pd.testing.assert_frame_equal(mirror(mirrored), frame, check_exact=True)
 
@@ -147,11 +141,12 @@ def test_every_model_feature_is_a_difference_and_none_is_an_outcome():
     # Swap-invariant columns are kept apart from the antisymmetric features.
     assert all(name.startswith("lvl_") for name in LEVEL_NAMES)
     assert not set(LEVEL_NAMES) & set(FEATURE_NAMES)
-    # M4.5 candidates are neither model features nor level features, so no
-    # model selected before M4.5 and no run of ``train`` reads them.
+    assert all(name.startswith("lvl_") for name in FAMILY_LEVEL_NAMES)
+    assert not set(FAMILY_LEVEL_NAMES) & (set(FEATURE_NAMES) | set(LEVEL_NAMES))
+    # Candidates that were not adopted are neither model features nor level
+    # features, so no run of ``train`` reads them.
     assert all(name.startswith("d_") for name in CANDIDATE_FEATURE_NAMES)
-    assert all(name.startswith("lvl_") for name in CANDIDATE_LEVEL_NAMES)
-    assert not set(CANDIDATE_NAMES) & (set(FEATURE_NAMES) | set(LEVEL_NAMES))
+    assert not set(CANDIDATE_NAMES) & (set(FEATURE_NAMES) | set(ALL_LEVEL_NAMES))
 
 
 def test_attribute_gap_flags_the_fighter_whose_profile_lacks_what_the_other_has():
@@ -195,7 +190,7 @@ def test_level_columns_are_the_mean_of_the_two_fighters():
     assert matchup.levels["lvl_age"] == (matchup.a["age"] + matchup.b["age"]) / 2
     assert matchup.levels["lvl_n_fights"] == (2 + 1) / 2
     assert matchup.levels["lvl_elo"] == (matchup.a["elo"] + matchup.b["elo"]) / 2
-    assert matchup.levels == build_matchup(store, young, old, on).levels
+    assert _same_values(matchup.levels, build_matchup(store, young, old, on).levels)
     # A missing value on either side leaves the mean missing, not halved.
     assert np.isnan(build_matchup(store, old, ageless, on).levels["lvl_age"])
 
