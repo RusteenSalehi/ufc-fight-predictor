@@ -16,8 +16,10 @@ What is refitted, and on what:
   attribute gap (D44)
 - the Platt slope: out-of-time predictions of a second model, fitted with the
   same recipe on bouts through 2024-12-31 (its feature parameters too), on
-  the bouts from 2025-01-01 on. The final booster is never calibrated on
-  bouts it was fitted on.
+  the bouts from 2025-01-01 on (window ``recent``, D47). With window
+  ``rolling`` (D57, D58) the bouts of 2023 and 2024, predicted by a model
+  fitted through 2022 (the candidate's own schedule), are added. The final
+  booster is never calibrated on bouts it was fitted on.
 - the number of trees, for both models: the count the candidate's own
   schedule chooses (fitted through 2022, early stopping on 2023 and 2024).
   The calibrator is fitted for a booster of that size, so the final booster
@@ -64,6 +66,16 @@ predictions for later bouts are what the Platt slope is fitted on."""
 STOPPING_YEARS = 2
 """Years at the end of a window held out to choose the number of trees, as in
 the candidate's own schedule (two validation years after training)."""
+
+RECENT = "recent"
+ROLLING = "rolling"
+CALIBRATION_WINDOWS: dict[str, str] = {
+    RECENT: "bouts after the calibration model's window, predicted by it (D47)",
+    ROLLING: (
+        "the two years before that too, each bout predicted by the model "
+        "fitted through two years before it (D57, D58)"
+    ),
+}
 
 
 def years_before(day: date, years: int) -> date:
@@ -119,11 +131,12 @@ def tree_count(
     config: FeatureConfig,
     window_end: date,
     reason: str,
-) -> tuple[TreeCount, Candidate]:
+) -> tuple[TreeCount, Candidate, pd.DataFrame]:
     """Early stopping inside a window: fit through ``window_end`` minus two
     years (feature parameters too), stop on the two years after. Returns the
-    count and the fitted model. For a window ending 2024-12-31 this is the
-    candidate's own schedule, so the count is the candidate's."""
+    count, the fitted model and the stopping rows (from its own table). For a
+    window ending 2024-12-31 this is the candidate's own schedule, so the
+    count and the model are the candidate's."""
     inner_end = years_before(window_end, STOPPING_YEARS)
     frame = _build(data, config, inner_end).frame
     splits = _splits(frame, inner_end, reason)
@@ -147,7 +160,7 @@ def tree_count(
         n_fitted=len(train),
         n_stopping=len(stop),
     )
-    return count, model
+    return count, model, stop
 
 
 def fit_fixed(
@@ -186,17 +199,23 @@ def refit(
     config: FeatureConfig,
     reason: str,
     calibration_end: date = CALIBRATION_END,
+    window: str = RECENT,
 ) -> Refit:
     """Fit the production model. ``recipe`` and ``config`` come from the
-    candidate; only ``config.train_end`` is replaced."""
+    candidate; only ``config.train_end`` is replaced. ``window`` is a key of
+    ``CALIBRATION_WINDOWS``."""
     if recipe.calibration != PLATT:
         raise ValueError("the production refit implements Platt calibration only")
+    if window not in CALIBRATION_WINDOWS:
+        raise ValueError(f"unknown calibration window {window!r}")
     last = max(b.date for b in data.bouts)
     if last <= calibration_end:
         raise ValueError("no completed bouts after the calibration model's window")
 
     # 1. The calibration model: everything fitted through calibration_end.
-    cal_count, _ = tree_count(data, recipe, config, calibration_end, reason)
+    cal_count, early_model, early = tree_count(
+        data, recipe, config, calibration_end, reason
+    )
     cal_build = _build(data, config, calibration_end)
     cal_splits = _splits(cal_build.frame, calibration_end, reason)
     cal_train = fit_rows(cal_splits.train())
@@ -207,8 +226,42 @@ def refit(
     )
     y_later = later["label"].to_numpy(dtype=np.float64)
     gap = attribute_gap(later).to_numpy()
-    calibrator = fit_calibrator(PLATT, p_later[~gap], y_later[~gap])
-    with_gaps = fit_calibrator(PLATT, p_later, y_later)
+    segments = [
+        {
+            "dates": [
+                later["date"].min().date().isoformat(),
+                later["date"].max().date().isoformat(),
+            ],
+            "predicted_by_model_fitted_through": calibration_end.isoformat(),
+            "n_bouts": int((~gap).sum()),
+        }
+    ]
+    p_fit, y_fit = p_later[~gap], y_later[~gap]
+    p_all, y_all = p_later, y_later
+    if window == ROLLING:
+        # The calibration model's own stopping years, predicted by the model
+        # fitted two years earlier, from that model's table.
+        p_early = early_model.predict(early, calibrated=False)
+        y_early = early["label"].to_numpy(dtype=np.float64)
+        early_gap = attribute_gap(early).to_numpy()
+        segments.insert(
+            0,
+            {
+                "dates": [
+                    early["date"].min().date().isoformat(),
+                    early["date"].max().date().isoformat(),
+                ],
+                "predicted_by_model_fitted_through": cal_count.fitted_through.isoformat(),
+                "n_bouts": int((~early_gap).sum()),
+            },
+        )
+        p_fit = np.concatenate((p_early[~early_gap], p_fit))
+        y_fit = np.concatenate((y_early[~early_gap], y_fit))
+        p_all = np.concatenate((p_early, p_all))
+        y_all = np.concatenate((y_early, y_all))
+        gap = np.concatenate((early_gap, gap))
+    calibrator = fit_calibrator(PLATT, p_fit, y_fit)
+    with_gaps = fit_calibrator(PLATT, p_all, y_all)
 
     # 2. The final booster: everything fitted through the latest event, with
     # as many trees as the model the calibrator was fitted for.
@@ -216,7 +269,7 @@ def refit(
     final_rows = fit_rows(_splits(final.frame, last, reason).train())
     final_model = fit_fixed(recipe, final_rows, cal_count.n_trees, last)
     # Recorded, not used: early stopping inside the final window.
-    stopped_count, _ = tree_count(data, recipe, config, last, reason)
+    stopped_count, _, _ = tree_count(data, recipe, config, last, reason)
     stopped_model = fit_fixed(recipe, final_rows, stopped_count.n_trees, last)
 
     # How much sharper the final booster is than the one the slope was fitted
@@ -241,14 +294,14 @@ def refit(
 
     calibration = {
         "method": PLATT,
+        "window": window,
+        "window_is": CALIBRATION_WINDOWS[window],
+        "segments": segments,
         "slope": calibrator.slope,
         "model_fitted_through": calibration_end.isoformat(),
         "model_n_trees": cal_count.n_trees,
         "model_n_fitted_bouts": len(cal_train),
-        "fitted_on": [
-            later["date"].min().date().isoformat(),
-            later["date"].max().date().isoformat(),
-        ],
+        "fitted_on": [segments[0]["dates"][0], segments[-1]["dates"][1]],
         "n_bouts": int((~gap).sum()),
         "n_attribute_gap_left_out": int(gap.sum()),
         "slope_if_attribute_gap_bouts_were_included": with_gaps.slope,

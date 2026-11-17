@@ -19,6 +19,8 @@ from ufc.models.design import FeatureSpec
 from ufc.models.recipe import Candidate, Recipe, fit_recipe
 from ufc.models.refit import (
     CALIBRATION_END,
+    RECENT,
+    ROLLING,
     STATUS,
     compare_predictions,
     fit_fixed,
@@ -147,3 +149,77 @@ def test_checks_on_the_refit(data, result):
     same = compare_predictions(result.candidate, frame, result.candidate, frame, 2026)
     assert same["correlation"] == pytest.approx(1.0)
     assert same["mean_abs_difference"] == 0.0 and same["pick_differs"] == 0
+
+
+# --- rolling calibration window (D57, D58) -----------------------------------------
+
+
+@pytest.fixture(scope="module")
+def rolling(data):
+    return refit(data, RECIPE, CONFIG, "test refit", window=ROLLING)
+
+
+def test_the_function_keeps_the_recent_window_by_default(result):
+    assert result.calibration["window"] == RECENT
+    assert len(result.calibration["segments"]) == 1
+    assert result.calibration["segments"][0]["n_bouts"] == result.calibration["n_bouts"]
+
+
+def test_rolling_window_adds_two_years_predicted_by_the_model_through_2022(
+    data, result, rolling
+):
+    cal = rolling.calibration
+    assert cal["window"] == ROLLING
+    early, late = cal["segments"]
+    assert early["predicted_by_model_fitted_through"] == "2022-12-31"
+    assert "2023-01-01" <= early["dates"][0] <= early["dates"][1] <= "2024-12-31"
+    assert late == result.calibration["segments"][0]
+    assert cal["n_bouts"] == early["n_bouts"] + late["n_bouts"]
+    assert cal["fitted_on"] == [early["dates"][0], late["dates"][1]]
+
+    # Recomputed by hand: the 2022 model is the candidate's own schedule, on
+    # its own table; the 2024 model is the one the recent window uses.
+    t2022 = build_features(data, CONFIG).frame
+    splits = Splits(t2022)
+    m2022, _ = fit_recipe(
+        RECIPE,
+        fit_rows(splits.train()),
+        labelled(splits.valid()),
+        SPLIT_DATES.train_end,
+    )
+    rows22 = labelled(splits.valid())
+    rows22 = rows22[~attribute_gap(rows22)]
+    p22 = m2022.predict(rows22, calibrated=False)
+    t2024 = build_features(
+        data, FeatureConfig(train_end=CALIBRATION_END, shrink_minutes=15)
+    ).frame
+    train24 = fit_rows(t2024[t2024["date"] <= np.datetime64("2024-12-31")])
+    rows24 = labelled(t2024[t2024["date"] > np.datetime64("2024-12-31")])
+    rows24 = rows24[~attribute_gap(rows24)]
+    m2024 = fit_fixed(RECIPE, train24, cal["model_n_trees"], CALIBRATION_END)
+    p24 = Candidate(RECIPE, m2024, IDENTITY_CALIBRATOR).predict(
+        rows24, calibrated=False
+    )
+    assert len(p22) == early["n_bouts"] and len(p24) == late["n_bouts"]
+    slope = fit_calibrator(
+        PLATT,
+        np.concatenate((p22, p24)),
+        np.concatenate((rows22["label"].to_numpy(), rows24["label"].to_numpy())),
+    ).slope
+    assert slope == pytest.approx(cal["slope"], abs=0)
+    assert rolling.candidate.calibrator.slope == cal["slope"]
+
+
+def test_the_window_changes_the_calibrator_and_nothing_else(result, rolling):
+    frame = rolling.final.frame
+    np.testing.assert_array_equal(
+        rolling.candidate.predict(frame, calibrated=False),
+        result.candidate.predict(frame, calibrated=False),
+    )
+    assert rolling.trees == result.trees
+    assert rolling.sharpness == result.sharpness
+
+
+def test_an_unknown_window_is_refused():
+    with pytest.raises(ValueError, match="window"):
+        refit(None, RECIPE, CONFIG, "x", window="everything")

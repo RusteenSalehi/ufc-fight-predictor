@@ -710,7 +710,7 @@ def calibration_window(args: argparse.Namespace) -> int:
     # Model fitted through 2022: the candidate itself, on its own table.
     t2022 = build_features(data, config).frame
     # Model fitted through 2024: the refit's calibration model (D47).
-    count, _ = tree_count(data, recipe, config, SPLIT_DATES.valid_end, reason)
+    count, _, _ = tree_count(data, recipe, config, SPLIT_DATES.valid_end, reason)
     t2024 = build_features(data, replace(config, train_end=SPLIT_DATES.valid_end))
     splits = Splits(t2024.frame, SplitDates(SPLIT_DATES.valid_end, last))
     splits.unlock_test(reason)

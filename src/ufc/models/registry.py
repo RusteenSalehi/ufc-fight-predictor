@@ -248,6 +248,14 @@ def approved_version(root: Path) -> str:
     return version
 
 
+def live_version(root: Path) -> str | None:
+    """The version ``approved.json`` names (the live model), or None when
+    nothing is approved. Read only."""
+    if not (root / APPROVED_FILE).exists():
+        return None
+    return approved_version(root)
+
+
 def load_approved(root: Path) -> tuple[Candidate, dict]:
     return load_candidate(root, approved_version(root))
 

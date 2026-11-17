@@ -43,12 +43,21 @@ from ufc.features.matchup import (
     LEVEL_NAMES,
     SHRUNK_FEATURE_NAMES,
 )
+from ufc.features.store import FittedParams
 from ufc.models import plots, registry
 from ufc.models.design import FeatureSpec
 from ufc.models.evaluate import evaluate_period
 from ufc.models.gbm import MAX_TREES, PATIENCE
+from ufc.models.recipe import Candidate
+from ufc.models.refit import (
+    CALIBRATION_WINDOWS,
+    ROLLING,
+    compare_predictions,
+    refit,
+    schema_check,
+    symmetry_check,
+)
 from ufc.models.refit import STATUS as REFIT_STATUS
-from ufc.models.refit import compare_predictions, refit, schema_check, symmetry_check
 from ufc.models.report import write_report
 from ufc.models.select import (
     Selection,
@@ -351,6 +360,12 @@ def run_evaluate(args: argparse.Namespace) -> int:
     train = fit_rows(splits.train())
     assert registry.dataset_hash(train, spec) == manifest["dataset"]["training_sha256"]
 
+    # Was the test period opened before, for another version? Then these
+    # bouts have been looked at and this is not a held-out result (D45, D58).
+    earlier = sorted(
+        {e["version"] for e in registry.read_ledger(args.models)} - {version}
+    )
+
     # From here on the test period is open, for this saved version only.
     splits.unlock_test(version)
     test = splits.test()
@@ -363,6 +378,16 @@ def run_evaluate(args: argparse.Namespace) -> int:
     record = evaluate_period(test, predictions, primary="model")
     record["version"] = version
     record["symmetry"] = _symmetry_check(candidate, test)
+    record["already_seen"] = {
+        "already_seen": bool(earlier),
+        "earlier_versions": earlier,
+        "note": (
+            "the test period was evaluated before for the versions listed; it "
+            "has been looked at, and these numbers are not a held-out result"
+            if earlier
+            else "first evaluation of the test period"
+        ),
+    }
 
     last_year = int(frame["date"].dt.year.max())
     first_year = SPLIT_DATES.test_start.year
@@ -390,6 +415,7 @@ def run_evaluate(args: argparse.Namespace) -> int:
         ),
     }
     backtest["version"] = version
+    backtest["already_seen"] = record["already_seen"]
 
     registry.record_test_metrics(args.models, version, record)
     _write_json(args.reports / TEST_FILE, record)
@@ -407,6 +433,12 @@ def run_evaluate(args: argparse.Namespace) -> int:
     )
 
     print(f"Evaluated {version} on {record['n_scored']} test-period bouts")
+    if earlier:
+        print(
+            "ALREADY SEEN: this test period was evaluated before for "
+            + ", ".join(earlier)
+            + "; these numbers are not a held-out result."
+        )
     print(
         f"({record['first_date']} to {record['last_date']}; {record['n_no_result']} no result)"
     )
@@ -460,11 +492,18 @@ def run_refit(args: argparse.Namespace) -> int:
         return 1
 
     reason = f"production refit of {parent}"
-    result = refit(data, old.recipe, feature_config_from(old_pipeline), reason)
+    result = refit(
+        data,
+        old.recipe,
+        feature_config_from(old_pipeline),
+        reason,
+        window=args.calibration_window,
+    )
     frame = result.final.frame
     meta = build_meta(result.final, data.source_commit)
     last = frame["date"].max()
     recent = frame[frame["date"] > last - pd.Timedelta(days=365)]
+    live = _live_comparison(args, data, result.candidate, frame, int(last.year))
     checks = {
         "symmetry": symmetry_check(result.candidate, recent),
         "schema": schema_check(
@@ -479,6 +518,8 @@ def run_refit(args: argparse.Namespace) -> int:
             result.candidate, frame, old, old_frame, int(last.year)
         ),
     }
+    if live is not None:
+        checks["versus_live"] = live
     passed = (
         checks["symmetry"]["sum_is_exactly_one"]
         and checks["symmetry"]["swap_is_exact"]
@@ -561,6 +602,13 @@ def run_refit(args: argparse.Namespace) -> int:
     )
     print(f"  symmetry: {checks['symmetry']}")
     print(f"  schema matches the candidate: {checks['schema']['all']}")
+    if live is not None:
+        print(
+            f"  versus the live model {live['version']} on {live['year']}: "
+            f"correlation {live['correlation']:.4f}, mean absolute difference "
+            f"{live['mean_abs_difference']:.4f}, picks differ in "
+            f"{live['pick_differs']}"
+        )
     print(
         f"  versus the candidate on {versus['year']}: correlation "
         f"{versus['correlation']:.4f}, mean absolute difference "
@@ -572,6 +620,32 @@ def run_refit(args: argparse.Namespace) -> int:
         + f"; promotion is a manual step. Record: {args.reports / REFIT_FILE}"
     )
     return 0
+
+
+def _live_comparison(
+    args: argparse.Namespace,
+    data: FeatureData,
+    new: Candidate,
+    frame: pd.DataFrame,
+    year: int,
+) -> dict | None:
+    """The new refit against the live model (the registry's pointer, read
+    only) on every bout of ``year``, each from its own feature pipeline.
+    None when no model is live."""
+    version = registry.live_version(args.models)
+    if version is None:
+        return None
+    live, _ = registry.load_candidate(args.models, version)
+    pipeline = registry.read_json(args.models, version, "feature_pipeline.json")
+    their_frame = build_features(
+        data,
+        feature_config_from(pipeline),
+        FittedParams.from_dict(pipeline["params"]),
+    ).frame
+    comparison = compare_predictions(new, frame, live, their_frame, year)
+    # compare_predictions names its sides for a refit against its candidate.
+    comparison["mean_favoured_live"] = comparison.pop("mean_favoured_candidate")
+    return {"version": version, **comparison}
 
 
 # --- report --------------------------------------------------------------------
@@ -664,6 +738,12 @@ def build_parser() -> argparse.ArgumentParser:
     inputs(refit_cmd)
     refit_cmd.add_argument(
         "--candidate", help="default: the candidate train last saved"
+    )
+    refit_cmd.add_argument(
+        "--calibration-window",
+        choices=sorted(CALIBRATION_WINDOWS),
+        default=ROLLING,
+        help="out-of-time bouts the Platt slope is fitted on (D47, D58)",
     )
     report = commands.add_parser("report", help="write docs/MODEL_REPORT.md")
     common(report)

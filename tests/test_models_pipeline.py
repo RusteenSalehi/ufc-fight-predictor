@@ -375,6 +375,12 @@ def test_refit_saves_a_new_version_with_lineage_and_approves_nothing(refitted):
     assert pipeline["config"]["train_end"] == record["fitted_through"]
     assert pipeline["last_date"] == record["fitted_through"]
     assert record["checks_passed"] and record["checks"]["schema"]["all"]
+    # The command's default is the rolling window (D58); with nothing live
+    # there is no comparison with a live model.
+    assert record["calibration"]["window"] == "rolling"
+    assert len(record["calibration"]["segments"]) == 2
+    assert "versus_live" not in record["checks"]
+    assert registry.live_version(refitted["models"]) is None
     assert record["checks"]["symmetry"]["swap_is_exact"]
     assert manifest["dataset"]["n_training_bouts"] == record["n_training_bouts"]
     assert not (refitted["models"] / registry.APPROVED_FILE).exists()
@@ -404,6 +410,12 @@ def test_refit_again_gives_the_same_version(refitted, capsys):
 # --- a fixed recipe with today's families (D58) -----------------------------------
 
 
+def test_evaluate_marks_the_first_evaluation_as_not_already_seen(workspace):
+    record = json.loads((workspace["reports"] / cli.TEST_FILE).read_text())
+    assert record["already_seen"]["already_seen"] is False
+    assert record["already_seen"]["earlier_versions"] == []
+
+
 @pytest.fixture(scope="module")
 def fixed(refitted):
     """``train --recipe-of`` the workspace's candidate into a second reports
@@ -428,9 +440,11 @@ def fixed(refitted):
     try:
         assert cli.main(train) == 0
         selection = json.loads((reports / cli.SELECTION_FILE).read_text())
+        assert cli.main(["evaluate", *common, *inputs]) == 0
+        test = json.loads((reports / cli.TEST_FILE).read_text())
     finally:
         patch.undo()
-    return {**refitted, "parent": parent, "fixed": selection}
+    return {**refitted, "parent": parent, "fixed": selection, "fixed_test": test}
 
 
 def test_a_fixed_recipe_with_nothing_added_reproduces_its_parent(fixed):
@@ -459,6 +473,13 @@ def test_a_fixed_recipe_with_nothing_added_reproduces_its_parent(fixed):
     assert config["fixed_recipe"]["parent"] == parent
 
 
+def test_evaluating_a_second_candidate_says_the_test_period_was_seen(fixed):
+    seen = fixed["fixed_test"]["already_seen"]
+    assert seen["already_seen"] is True
+    assert seen["earlier_versions"] == [fixed["parent"]]
+    assert "not a held-out result" in seen["note"]
+
+
 def test_a_fixed_recipe_needs_its_parents_selection_record(fixed, tmp_path, capsys):
     refit_version = fixed["refit"]["version"]
     common = ["--models", str(fixed["models"]), "--reports", str(tmp_path)]
@@ -471,3 +492,38 @@ def test_a_fixed_recipe_needs_its_parents_selection_record(fixed, tmp_path, caps
     args = ["train", *common, *inputs, "--recipe-of", refit_version]
     assert cli.main(args) == 1
     assert "is a refit" in capsys.readouterr().err
+
+
+def test_refit_compares_with_the_live_model_when_there_is_one(fixed, tmp_path):
+    """With a pointer in a copy of the registry, the refit record compares
+    the new refit with the live model on the latest year."""
+    import shutil
+
+    models = tmp_path / "models"
+    shutil.copytree(fixed["models"], models)
+    # The saved refit's record has no comparison; drop it from the copy so
+    # this run saves its own. The live model here is the parent candidate.
+    shutil.rmtree(models / fixed["refit"]["version"])
+    live = fixed["parent"]
+    (models / registry.APPROVED_FILE).write_text(json.dumps({"version": live}))
+    args = [
+        "refit",
+        "--models",
+        str(models),
+        "--reports",
+        str(tmp_path),
+        "--db",
+        str(fixed["db"]),
+        "--features",
+        str(tmp_path / "f"),
+        "--candidate",
+        fixed["parent"],
+    ]
+    assert cli.main(args) == 0
+    record = json.loads((tmp_path / cli.REFIT_FILE).read_text())
+    versus = record["checks"]["versus_live"]
+    assert versus.pop("version") == live
+    # The live model is the candidate, so the two comparisons agree.
+    candidate = dict(record["checks"]["versus_candidate"])
+    candidate["mean_favoured_live"] = candidate.pop("mean_favoured_candidate")
+    assert versus == candidate
