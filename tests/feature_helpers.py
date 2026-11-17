@@ -317,3 +317,30 @@ def random_league(
                 time_format=time_format,
             )
     return league
+
+
+def scramble(bout: BoutFacts) -> BoutFacts:
+    """The same bout with a different outcome, different stats and a
+    different weight class: everything a feature could read from it."""
+    a, b = bout.fighter_a_id, bout.fighter_b_id
+    changed = replace(
+        bout,
+        result="win",
+        winner_id=b if bout.winner_id == a else a,
+        method="Submission" if bout.method == "KO/TKO" else "KO/TKO",
+        weight_class="Heavyweight",
+        is_title_bout=not bout.is_title_bout,
+    )
+    if bout.totals:
+        changed = replace(
+            changed,
+            totals={a: bout.totals[b], b: bout.totals[a]},
+            rounds={a: bout.rounds[b], b: bout.rounds[a]},
+        )
+    return changed
+
+
+def scramble_where(data: FeatureData, should_change) -> FeatureData:
+    return replace(
+        data, bouts=[scramble(b) if should_change(b) else b for b in data.bouts]
+    )
