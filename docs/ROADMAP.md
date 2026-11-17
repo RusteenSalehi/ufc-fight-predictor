@@ -48,13 +48,14 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - `src/ufc/models/`: splits with a test-period lock, exact-symmetry inference, Elo and logistic baselines, XGBoost and LightGBM, calibration, ablation, registry, plots. Design choices are in DECISIONS D35 to D44.
 - A leak through missing profile attributes was found on the training period and removed before the test period was opened (D44).
 - Results, including the choices validation could not separate and the families that did not help, are in `docs/MODEL_REPORT.md`. The candidate is not approved; `data/models/approved.json` is written by hand.
-- Open for M5: bouts with an attribute gap (mostly recent debutants) need the "limited data" label; prediction must build features with the settings and fitted parameters stored beside the model (`feature_pipeline.json`); the recipe has been refitted on data through 2026-11-14 as `xgboost-ffc3ca8c-ee729619` (D47; not approved), and M5 predicts with whichever version `approved.json` names.
+- Open for M5: bouts with an attribute gap (mostly recent debutants) need the "limited data" label; prediction must build features with the settings and fitted parameters stored beside the model (`feature_pipeline.json`); the recipe has been refitted on data through 2026-11-14 as `xgboost-ffc3ca8c-ee729619` (D47; later approved by hand), and M5 predicts with whichever version `approved.json` names.
 
-## M4.5 (Opus 5.5, high effort): model revision, analysis done, adoption open
+## M4.5 (Opus 5.5, high effort): model revision, adopted; approval open
 
 - Triggered by age dominating SHAP when an older, higher-rated fighter meets a much younger one. `uv run python -m ufc.models.revision run` (slices and variants) and `... calibration-window`; results in `docs/MODEL_REPORT.md`, "Model revision M4.5"; decisions D54 to D57.
-- Finding: the model does not underrate elite veterans; it slightly overrates older fighters. Of four pre-registered variants, `age_shape` passes the rule (weakly) and is the recommended recipe; nothing has been refitted or approved.
-- Open, the user's call: adopt `age_shape` (save a candidate with the fixed recipe, refit, approve) or keep the current recipe; the calibration window for the next refit (rolling 2023 to 2026 recommended).
+- Finding: the model does not underrate elite veterans; it slightly overrates older fighters. Of four pre-registered variants, `age_shape` passes the rule (weakly).
+- Adopted (D58): `age_shape` is feature family 15; candidate `xgboost-ed7a4d35-852c380d` (M4 recipe plus family 15, nothing re-tuned) and its refit `xgboost-a586af7b-609ecab1` with the rolling 2023 to 2026 calibration window. Records in `data/reports/m45/`; results in `docs/MODEL_REPORT.md`, "Production model after M4.5".
+- Open, the user's call: approve `xgboost-a586af7b-609ecab1` by editing `data/models/approved.json`.
 
 ## M5 (Opus 5.5, high effort): done
 
