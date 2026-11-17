@@ -1,11 +1,15 @@
-"""Cut a small, real subset of the published dataset for use as test fixtures.
+"""Cut small, real subsets of the published dataset for use as test fixtures.
 
 Usage:
-    uv run python scripts/make_ingest_fixtures.py [SOURCE_DIR] [DEST_DIR]
+    uv run python scripts/make_ingest_fixtures.py [SOURCE_DIR] [FIXTURES_DIR]
 
-Defaults: data/external/greco -> tests/fixtures/greco. Rows are copied
-unchanged. The fights are chosen to cover the edge cases the ingestion has to
-handle; the reason for each is given next to its ID below.
+Defaults: data/external/greco -> tests/fixtures. Rows are copied unchanged.
+Two subsets are written:
+
+    greco/             fights chosen to cover the edge cases ingestion has to
+                       handle; the reason for each is given next to its ID
+    greco_spot_check/  one fighter's first four UFC bouts, for the feature
+                       pipeline's hand-calculated spot check
 """
 
 from __future__ import annotations
@@ -50,6 +54,15 @@ FIGHT_IDS = {
     "44d58943ac8e47e1": "women's catch-weight bout, not labelled as women's",
 }
 
+# Khabib Nurmagomedov's first four UFC bouts. tests/test_features_spot_check.py
+# computes his stats before the fourth by hand from the first three.
+SPOT_CHECK_FIGHT_IDS = {
+    "8360accf6f70ebc4": "2012-01-20, submission win in round 3",
+    "ded18af0e4eae2f7": "2012-07-07, unanimous decision win",
+    "7651b2e09ea2c420": "2013-01-19, KO/TKO win in round 1",
+    "e1d33aa47b35d021": "2013-05-25, the bout whose pre-fight features are checked",
+}
+
 EXTRA_FIGHTER_IDS = {
     "09a4447655fd4b7b": "target of the misspelled-name override",
     "8988705468d04ef7": "target of the shortened-name override",
@@ -63,21 +76,27 @@ def fighter_id(row: dict[str, str]) -> str:
     return p.id_from_url(row["URL"], "fighter")
 
 
-def main(source_dir: Path, dest_dir: Path) -> None:
+def cut(
+    source_dir: Path,
+    dest_dir: Path,
+    fight_ids: dict[str, str],
+    extra_fighter_ids: dict[str, str],
+) -> None:
+    """Write the rows for ``fight_ids`` and everyone named in them."""
     raw = source.load_raw_tables(source_dir)
     info = source.read_source_info(source_dir)
 
     results = [
-        r for r in raw.fight_results if p.id_from_url(r["URL"], "fight") in FIGHT_IDS
+        r for r in raw.fight_results if p.id_from_url(r["URL"], "fight") in fight_ids
     ]
     found = {p.id_from_url(r["URL"], "fight") for r in results}
-    if found != set(FIGHT_IDS):
+    if found != set(fight_ids):
         raise SystemExit(
-            f"fights not found in source: {sorted(set(FIGHT_IDS) - found)}"
+            f"fights not found in source: {sorted(set(fight_ids) - found)}"
         )
 
     details = [
-        r for r in raw.fight_details if p.id_from_url(r["URL"], "fight") in FIGHT_IDS
+        r for r in raw.fight_details if p.id_from_url(r["URL"], "fight") in fight_ids
     ]
     stat_keys = {(p.clean(r["EVENT"]), p.clean(r["BOUT"])) for r in results}
     stats = [
@@ -89,7 +108,7 @@ def main(source_dir: Path, dest_dir: Path) -> None:
     events = [r for r in raw.events if p.clean(r["EVENT"]) in event_names]
 
     name_keys = {p.name_key(name) for r in results for name in p.split_bout(r["BOUT"])}
-    wanted = set(EXTRA_FIGHTER_IDS)
+    wanted = set(extra_fighter_ids)
     for row in raw.fighter_details:
         if p.name_key(f"{row['FIRST']} {row['LAST']}") in name_keys:
             wanted.add(fighter_id(row))
@@ -136,9 +155,14 @@ def main(source_dir: Path, dest_dir: Path) -> None:
     )
 
 
+def main(source_dir: Path, fixtures_dir: Path) -> None:
+    cut(source_dir, fixtures_dir / "greco", FIGHT_IDS, EXTRA_FIGHTER_IDS)
+    cut(source_dir, fixtures_dir / "greco_spot_check", SPOT_CHECK_FIGHT_IDS, {})
+
+
 if __name__ == "__main__":
     arguments = [Path(a) for a in sys.argv[1:]]
     main(
         arguments[0] if arguments else Path("data/external/greco"),
-        arguments[1] if len(arguments) > 1 else Path("tests/fixtures/greco"),
+        arguments[1] if len(arguments) > 1 else Path("tests/fixtures"),
     )
