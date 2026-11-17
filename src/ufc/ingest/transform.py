@@ -310,6 +310,13 @@ def _build_fighters(
     return fighters, profiles
 
 
+def build_profiles(listing_rows: list[Row], tape_rows: list[Row]) -> list[Profile]:
+    """The profiles name resolution matches against, exactly as the load
+    builds them. Upcoming cards (``ufc.predict``) resolve names with these, so
+    a name means the same fighter in both places."""
+    return _build_fighters(listing_rows, tape_rows, [])[1]
+
+
 def _parse_attribute(parser, text: str, fighter_id: str, issues: list[Issue]):
     try:
         return parser(text)
