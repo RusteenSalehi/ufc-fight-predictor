@@ -98,11 +98,13 @@ class EloTracker:
         delta: dict[str, float] = defaultdict(float)
         seen: dict[str, int] = defaultdict(int)
         for a, b, score_a, is_finish in bouts:
-            expected_a = expected_score(self.rating(a), self.rating(b), p.scale)
+            rating_a, rating_b = self.rating(a), self.rating(b)
             step = p.k * (p.finish_mult if is_finish else 1.0)
+            # Each fighter's surprise is computed from his own side, so the
+            # result does not depend on which of the two is listed first.
             for fighter, surprise in (
-                (a, score_a - expected_a),
-                (b, expected_a - score_a),
+                (a, score_a - expected_score(rating_a, rating_b, p.scale)),
+                (b, (1.0 - score_a) - expected_score(rating_b, rating_a, p.scale)),
             ):
                 provisional = self._rated_bouts[fighter] < p.provisional_bouts
                 delta[fighter] += (
@@ -171,8 +173,12 @@ def _log_loss(days: Sequence[tuple[int, list[RatedBout]]], params: EloParams) ->
         for a, b, score_a, _ in rated:
             if score_a == 0.5:
                 continue
-            p_a = expected_score(tracker.rating(a), tracker.rating(b), params.scale)
-            total -= math.log(p_a if score_a == 1.0 else 1.0 - p_a)
+            winner, loser = (a, b) if score_a == 1.0 else (b, a)
+            total -= math.log(
+                expected_score(
+                    tracker.rating(winner), tracker.rating(loser), params.scale
+                )
+            )
             count += 1
         tracker.commit(ordinal, rated)
     return total / count if count else math.nan

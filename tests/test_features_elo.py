@@ -156,3 +156,21 @@ def test_fit_ignores_everything_after_the_training_period():
     ]
     assert fit_elo_params(truncated, train_end) == fit
     assert fit_elo_params(flipped, train_end) == fit
+
+
+def test_ratings_do_not_depend_on_which_fighter_is_listed_first():
+    bouts = list(random_league().data().bouts)
+    params = EloParams(k=40, finish_mult=1.3, provisional_mult=2.0)
+    listed = {p.bout_id: p for p in run_elo(bouts, params)}
+    swapped = run_elo(
+        [
+            replace(b, fighter_a_id=b.fighter_b_id, fighter_b_id=b.fighter_a_id)
+            for b in bouts
+        ],
+        params,
+    )
+    for prediction in swapped:
+        original = listed[prediction.bout_id]
+        # Exactly equal, not approximately.
+        assert prediction.rating_a == original.rating_b
+        assert prediction.rating_b == original.rating_a
