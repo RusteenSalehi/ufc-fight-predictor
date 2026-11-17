@@ -23,7 +23,7 @@ from ufc.features.build import (
     write_features,
 )
 from ufc.features.data import load_feature_data
-from ufc.features.matchup import FEATURES
+from ufc.features.matchup import FAMILIES, FEATURES
 
 DEFAULT_DB_PATH = Path("data/ufc.db")
 DEFAULT_OUT_DIR = Path("data/features")
@@ -96,7 +96,8 @@ def run_summary(out_dir: Path) -> int:
         f"{len(frame)} bouts, {established} with no debutant, {len(summary)} features. "
         "Columns: missing in all bouts / missing where neither fighter is a debutant."
     )
-    for family, rows in summary.groupby("family", sort=False):
+    for family in FAMILIES:
+        rows = summary[summary["family"] == family]
         print(f"\n{family} ({len(rows)})")
         for row in rows.itertuples():
             print(f"  {row.feature:38} {row.missing:>6} {row.missing_established:>6}")
