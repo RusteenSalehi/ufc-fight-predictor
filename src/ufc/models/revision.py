@@ -678,12 +678,17 @@ def calibration_window(args: argparse.Namespace) -> int:
     JSON record; no slope is adopted here (it cannot be scored on
     validation)."""
     version = json.loads((args.eval / "selection.json").read_text())["version"]
-    approved = registry.approved_version(args.models)
     candidate, _ = registry.load_candidate(args.models, version)
-    production, _ = registry.load_candidate(args.models, approved)
-    lineage = registry.read_manifest(args.models, approved).get("lineage") or {}
-    if lineage.get("parent") != version:
-        raise ValueError(f"{approved} is not a refit of {version}")
+    refits = [
+        v
+        for v in registry.list_versions(args.models)
+        if (registry.read_manifest(args.models, v).get("lineage") or {}).get("parent")
+        == version
+    ]
+    if len(refits) != 1:
+        raise ValueError(f"expected one production refit of {version}, found {refits}")
+    (production_version,) = refits
+    production, _ = registry.load_candidate(args.models, production_version)
     recipe = candidate.recipe
     config = _feature_config(args.models, version)
     conn = connect(args.db)
@@ -723,7 +728,9 @@ def calibration_window(args: argparse.Namespace) -> int:
     # The production booster's uncalibrated probabilities on 2026 bouts, from
     # its own feature pipeline. It was fitted on these bouts, so only their
     # spread is reported, never a score.
-    pipeline = registry.read_json(args.models, approved, "feature_pipeline.json")
+    pipeline = registry.read_json(
+        args.models, production_version, "feature_pipeline.json"
+    )
     final = build_features(
         data,
         _config_from(pipeline["config"]),
@@ -734,7 +741,7 @@ def calibration_window(args: argparse.Namespace) -> int:
 
     out: dict = {
         "candidate": version,
-        "production": approved,
+        "production": production_version,
         "production_slope": production.calibrator.slope,
         "calibration_model_2024_trees": count.n_trees,
         "spread_on": f"{len(recent)} bouts of {last.year} (in the production booster's training data)",
