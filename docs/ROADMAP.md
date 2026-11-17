@@ -41,6 +41,15 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - `src/ufc/features/`: as-of store, Elo, per-fighter features for families 1 to 12 (style archetypes excluded), opponent adjustment, matchup assembly. `build_matchup` gives the same features for a hypothetical bout from two fighter IDs and a date.
 - Tests: perturbation, same-event, symmetry, and a hand-calculated spot check on four real bouts (read from `data/external/greco/` at test time; skipped if absent). Design choices are in DECISIONS D23 to D29.
 
+## M4 (Fable 5.2, high effort): done
+
+- M3 review changes applied first: own Elo is family 13 (D31), one training-fit Elo for features and baseline (D32), per-minute rates shrunk toward weight-class means with the strength chosen on validation (D33), swap-invariant level features as candidates (D34).
+- `uv run python -m ufc.models train`: selection on validation in fixed stages, then the candidate is saved under `data/models/`. `evaluate`: the one test-period evaluation plus a yearly walk-forward backtest. `report`: the generated block of `docs/MODEL_REPORT.md`.
+- `src/ufc/models/`: splits with a test-period lock, exact-symmetry inference, Elo and logistic baselines, XGBoost and LightGBM, calibration, ablation, registry, plots. Design choices are in DECISIONS D35 to D44.
+- A leak through missing profile attributes was found on the training period and removed before the test period was opened (D44).
+- Results, including the choices validation could not separate and the families that did not help, are in `docs/MODEL_REPORT.md`. The candidate is not approved; `data/models/approved.json` is written by hand.
+- Open for M5: bouts with an attribute gap (mostly recent debutants) need the "limited data" label; prediction must build features with the settings and fitted parameters stored beside the model (`feature_pipeline.json`); whether to refit the recipe on data through the present before going live is a decision for the user.
+
 ## M2 (Sonnet 5.5, medium effort): done
 
 - `scripts/data_quality.py` reads `data/ufc.db` and writes the generated block of `docs/DATA_QUALITY.md`: attribute completeness by activity and debut date, freshness against today, per-year coverage, duplicates, `ingest_issues`, dropped-bout evidence and event gaps. Tested in `tests/test_data_quality.py`.
