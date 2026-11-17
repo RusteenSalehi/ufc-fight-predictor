@@ -50,6 +50,12 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - Results, including the choices validation could not separate and the families that did not help, are in `docs/MODEL_REPORT.md`. The candidate is not approved; `data/models/approved.json` is written by hand.
 - Open for M5: bouts with an attribute gap (mostly recent debutants) need the "limited data" label; prediction must build features with the settings and fitted parameters stored beside the model (`feature_pipeline.json`); the recipe has been refitted on data through 2026-11-14 as `xgboost-ffc3ca8c-ee729619` (D47; not approved), and M5 predicts with whichever version `approved.json` names.
 
+## M5 (Opus 5.5, high effort): done
+
+- `uv run python -m ufc.predict refresh`: the scheduled events and their cards from English Wikipedia (MediaWiki API, two to four requests, cached), fighter resolution with the ingest's rules, card changes applied whole or not at all, staleness against completed events the dataset lacks, missing attributes from fighters' infoboxes, predictions with the approved model, and a JSON dump in `data/publish/` behind the validation gate. Design choices are in DECISIONS D48 to D53.
+- The first live run found five veterans whose names Wikipedia spells differently; they are overrides now, and a guard leaves such a bout unresolved when the fighter's article cites a UFCStats profile in the dataset (D49).
+- Open for M6: SHAP factors (`shap_json` is empty), the S3 artifact layout and immutable archive snapshots, scoring live predictions once their events reach the dataset, and the "limited data" label on the site.
+
 ## M2 (Sonnet 5.5, medium effort): done
 
 - `scripts/data_quality.py` reads `data/ufc.db` and writes the generated block of `docs/DATA_QUALITY.md`: attribute completeness by activity and debut date, freshness against today, per-year coverage, duplicates, `ingest_issues`, dropped-bout evidence and event gaps. Tested in `tests/test_data_quality.py`.
@@ -80,12 +86,6 @@ Read CLAUDE.md and every file in docs/ before starting, especially ML_REQUIREMEN
 6. Required tests: the perturbation test, the same-event test, a hand-calculated spot check for one known fighter, and a test that building features for (A, B) and (B, A) gives exactly negated difference features.
 7. Commit in small steps. Do not push. Summarize the final feature list with counts of missing values.
 ```
-
-## M5 (Opus 5.5, high effort): done
-
-- `uv run python -m ufc.predict refresh`: the scheduled events and their cards from English Wikipedia (MediaWiki API, two to four requests, cached), fighter resolution with the ingest's rules, card changes applied whole or not at all, staleness against completed events the dataset lacks, missing attributes from fighters' infoboxes, predictions with the approved model, and a JSON dump in `data/publish/` behind the validation gate. Design choices are in DECISIONS D48 to D53.
-- The first live run found five veterans whose names Wikipedia spells differently; they are overrides now, and a guard leaves such a bout unresolved when the fighter's article cites a UFCStats profile in the dataset (D49).
-- Open for M6: SHAP factors (`shap_json` is empty), the S3 artifact layout and immutable archive snapshots, scoring live predictions once their events reach the dataset, and the "limited data" label on the site.
 
 ## M4 prompt (Fable 5.2 or Opus 5.5, high effort)
 
