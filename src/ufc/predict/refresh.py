@@ -14,8 +14,11 @@ Order and failure handling (D50):
 4. Fill missing height, reach and date of birth from linked articles.
 5. Predict every resolved bout with the approved model; if no model is
    approved, skip predictions.
-6. Validate and write ``data/publish/predictions.json``, or keep the last
-   good file.
+6. Link provisional fighters of past cards who now have a dataset profile.
+7. Build the site's artifacts (bout pages, ``upcoming.json``,
+   ``performance.json`` with the live record), validate every one, and write
+   them with archive snapshots, or keep the last good artifacts
+   (``ufc.publish.gate``).
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ from pathlib import Path
 from ufc.features.data import load_feature_data
 from ufc.ingest.identity import FighterResolver
 from ufc.models import registry
-from ufc.predict import publish
 from ufc.predict.backfill import BackfillResult, backfill, merged_attributes
 from ufc.predict.cards import (
     LIST_PAGE,
@@ -42,6 +44,7 @@ from ufc.predict.cards_db import (
     CardChange,
     apply_card,
     bout_id,
+    link_past_provisionals,
     log,
     retire_events,
     upsert_event,
@@ -55,6 +58,9 @@ from ufc.predict.wikipedia import (
     Wikipedia,
     WikipediaError,
 )
+from ufc.publish import gate
+from ufc.publish.history import History, read_names
+from ufc.publish.performance import DEFAULT_REPORTS
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +79,9 @@ class RefreshResult:
     model_error: str | None = None
     published: Path | None = None
     publish_problems: list[str] = field(default_factory=list)
+    archived: list[Path] = field(default_factory=list)
+    linked: list[tuple[str, str]] = field(default_factory=list)
+    live_counts: dict[str, int] = field(default_factory=dict)
     requests: int = 0
 
 
@@ -92,6 +101,7 @@ def refresh(
     publish_dir: Path,
     today: date,
     now: str,
+    reports_root: Path = DEFAULT_REPORTS,
 ) -> RefreshResult:
     result = RefreshResult(run_at=now)
 
@@ -275,29 +285,51 @@ def refresh(
             "parent": (manifest.get("lineage") or {}).get("parent"),
         }
 
-    # 6. Validate and publish.
-    record = publish.snapshot(
+    # 6. Link provisional fighters of past cards who now have a profile, so
+    # that live scoring can match their bouts (the card rules, D49).
+    with conn:
+        result.linked = link_past_provisionals(conn, resolver, today, now)
+
+    # 7. Build, validate and publish the site's artifacts, or keep the last
+    # good ones (ufc.publish.gate).
+    events_by_id, fighter_names = read_names(conn)
+    staleness = result.staleness.to_dict()
+    published = gate.publish(
         conn,
+        publish_dir,
         today=today,
-        generated_at=now,
+        now=now,
         model=model_record,
-        staleness=result.staleness.to_dict(),
+        model_inputs=spec_names,
+        staleness=staleness,
         dataset={
             "source_commit": data.source_commit,
-            "last_event": result.staleness.to_dict()["dataset_last_event"],
+            "last_event": staleness["dataset_last_event"],
         },
+        models_root=models_root,
+        reports_root=reports_root,
+        history=History.build(data.bouts, events_by_id, fighter_names),
     )
-    result.publish_problems = publish.validate(record, today, spec_names)
+    result.publish_problems = published.problems
+    result.archived = published.archived
+    result.live_counts = published.live_counts
     with conn:
-        if result.publish_problems:
+        if published.problems:
             log(
                 conn,
                 now,
                 "error",
-                "not published: " + "; ".join(result.publish_problems[:5]),
+                "not published: " + "; ".join(published.problems[:5]),
             )
         else:
-            result.published = publish.write(record, publish_dir)
+            result.published = publish_dir / gate.PUBLIC / gate.UPCOMING_FILE
+            log(
+                conn,
+                now,
+                "info",
+                f"published {len(published.written)} file(s), "
+                f"archived {len(published.archived)} snapshot(s)",
+            )
     result.ok = not result.event_errors and not result.publish_problems
     result.requests = client.requests_made
     return result

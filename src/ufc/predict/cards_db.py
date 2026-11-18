@@ -25,8 +25,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 
+from ufc.ingest.identity import FighterResolver
 from ufc.predict.cards import CardBout, CardFighter, ListedEvent
-from ufc.predict.resolve import BoutResolution, provisional_id
+from ufc.predict.resolve import BoutResolution, provisional_id, resolve_fighter
 from ufc.predict.wikipedia import Page
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,44 @@ def _link_provisional(
         """,
         (fighter_id, now, provisional_id(fighter)),
     )
+
+
+def link_past_provisionals(
+    conn: sqlite3.Connection, resolver: FighterResolver, today: date, now: str
+) -> list[tuple[str, str]]:
+    """Link provisional fighters on cards dated today or earlier whose name
+    now resolves to a dataset profile (the debutant's first bout has reached
+    the dataset). Card resolution only links fighters on cards it applies,
+    which are future ones, so without this a debutant's bout could never be
+    matched to its result. Same rules as the card (D49): a name that is
+    ambiguous or still unknown stays unlinked. Returns (provisional ID,
+    fighter ID) pairs linked."""
+    rows = conn.execute(
+        """
+        SELECT DISTINCT p.provisional_id, p.name, p.page_title, b.weight_class
+        FROM provisional_fighters p
+        JOIN upcoming_bouts b
+          ON p.provisional_id IN (b.fighter_a_ref, b.fighter_b_ref)
+        JOIN upcoming_events e USING (event_key)
+        WHERE p.fighter_id IS NULL AND e.date <= ?
+        ORDER BY p.provisional_id
+        """,
+        (today.isoformat(),),
+    ).fetchall()
+    linked: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if row["provisional_id"] in seen:
+            continue
+        seen.add(row["provisional_id"])
+        fighter = CardFighter(row["name"], row["page_title"])
+        r = resolve_fighter(resolver, fighter, "", row["weight_class"])
+        if r.ref is None or r.provisional:
+            continue
+        _link_provisional(conn, fighter, r.ref, now)
+        log(conn, now, "info", f"linked provisional {row['provisional_id']} to {r.ref}")
+        linked.append((row["provisional_id"], r.ref))
+    return linked
 
 
 def apply_card(

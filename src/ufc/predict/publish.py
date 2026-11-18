@@ -1,22 +1,25 @@
-"""A plain JSON dump of the current predictions, behind a validation gate.
+"""The current predictions as one record, and the card checks of the
+validation gate.
 
-This is the M5 output (``data/publish/predictions.json``); the artifact
-layout for the site comes in M6. The file is replaced only when every check
-passes (docs/ARCHITECTURE.md, "Validation gate"); otherwise the last good
-file stays where it is.
+``snapshot`` reads every scheduled event and its bouts with their current
+predictions; ``validate`` lists the reasons it must not be published
+(docs/ARCHITECTURE.md, "Validation gate"). The site's artifacts are built
+from this record and written by ``ufc.publish.gate`` (M6); ``show`` prints
+it. The "why" is rendered from the contributions and values stored with
+each prediction, so the current wording applies to every row (D65).
 """
 
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
+from ufc.predict.explain import explain_values
+
 DEFAULT_DIR = Path("data/publish")
-FILE_NAME = "predictions.json"
 ATTRIBUTION = (
     "Fight cards and some fighter attributes: English Wikipedia, CC BY-SA 4.0 "
     "(https://creativecommons.org/licenses/by-sa/4.0/). Fight statistics: "
@@ -33,6 +36,24 @@ def _fighter(row: sqlite3.Row, side: str) -> dict:
         "provisional": bool(ref and ref.startswith("wp")),
         "resolution": row[f"method_{side}"],
     }
+
+
+def stored_why(row: sqlite3.Row, p_a: float, p_b: float) -> dict | None:
+    """The "why", rendered with the current templates from the contributions
+    and as-of values stored with the prediction; None for a row made before
+    explanations were stored."""
+    if not row["shap_json"]:
+        return None
+    toward_a = json.loads(row["shap_json"])["log_odds_toward_a"]
+    features = json.loads(row["features_json"])
+    return explain_values(
+        toward_a,
+        features["fighter_a"],
+        features["fighter_b"],
+        (row["name_a"], row["name_b"]),
+        p_a,
+        p_b,
+    )
 
 
 def snapshot(
@@ -108,9 +129,7 @@ def snapshot(
                         json.loads(row["features_json"])["model_inputs"]
                     ),
                     # Rows made before explanations existed have none.
-                    "why": json.loads(row["shap_json"])["why"]
-                    if row["shap_json"]
-                    else None,
+                    "why": stored_why(row, p_a, p_b),
                 }
             )
         if not bouts and not unresolved:
@@ -168,14 +187,3 @@ def validate(
             if record["model"] and bout["model_version"] != record["model"]["version"]:
                 problems.append(f"{label}: predicted by {bout['model_version']}")
     return problems
-
-
-def write(record: dict, directory: Path) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / FILE_NAME
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    os.replace(temporary, path)
-    return path

@@ -1,7 +1,8 @@
 """Command line for upcoming cards and predictions.
 
 uv run python -m ufc.predict refresh   read cards from Wikipedia, predict with the
-                                       approved model, write data/publish/predictions.json
+                                       approved model, publish the site's artifacts
+                                       under data/publish/ (public/ and archive/)
 uv run python -m ufc.predict show      print stored predictions (read-only)
 uv run python -m ufc.predict matchup   predict a hypothetical bout (read-only, not stored)
 """
@@ -23,6 +24,8 @@ from ufc.predict import publish, show
 from ufc.predict.refresh import RefreshResult, refresh
 from ufc.predict.resolve import load_wikipedia_overrides, resolver_from_snapshot
 from ufc.predict.wikipedia import DEFAULT_CACHE, Wikipedia, http_transport
+from ufc.publish import gate
+from ufc.publish.performance import DEFAULT_REPORTS
 
 
 def _pct(p: float) -> str:
@@ -61,14 +64,25 @@ def print_summary(result: RefreshResult, publish_dir: Path) -> None:
             f"Predictions with {result.model_version}: {len(p.made)} new, "
             f"{len(p.unchanged)} unchanged, {len(p.superseded)} superseded"
         )
+    for provisional, fighter_id in result.linked:
+        print(f"Linked {provisional} to dataset fighter {fighter_id}")
     if result.published:
-        print(f"Published: {result.published}")
+        print(f"Published: {result.published.parent}")
+        if result.archived:
+            print(f"Archived {len(result.archived)} new snapshot(s):")
+            for path in result.archived:
+                print(f"  {path}")
+        else:
+            print("No card changed since its last archive snapshot.")
     else:
-        print("Not published; the last good file is unchanged:")
+        print("Not published; the last good artifacts are unchanged:")
         for problem in result.publish_problems[:10]:
             print(f"  - {problem}")
+    if result.live_counts:
+        counts = ", ".join(f"{k} {v}" for k, v in result.live_counts.items() if v)
+        print(f"Live record: {counts}")
 
-    path = publish_dir / publish.FILE_NAME
+    path = publish_dir / gate.PUBLIC / gate.UPCOMING_FILE
     if not path.exists():
         return
     record = json.loads(path.read_text(encoding="utf-8"))
@@ -122,6 +136,7 @@ def run_refresh(args: argparse.Namespace) -> int:
             publish_dir=args.publish,
             today=moment.date(),
             now=moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            reports_root=args.reports,
         )
     finally:
         conn.close()
@@ -201,6 +216,12 @@ def main(argv: list[str] | None = None) -> int:
     cmd.add_argument("--models", type=Path, default=registry.DEFAULT_ROOT)
     cmd.add_argument("--publish", type=Path, default=publish.DEFAULT_DIR)
     cmd.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    cmd.add_argument(
+        "--reports",
+        type=Path,
+        default=DEFAULT_REPORTS,
+        help="where to find the approved model's evaluation records",
+    )
     shown = commands.add_parser("show", help="print stored predictions (read-only)")
     shown.add_argument("--db", type=Path, default=Path("data/ufc.db"))
     shown.add_argument(

@@ -7,6 +7,7 @@ a failed or broken read changes nothing.
 
 import json
 from datetime import date
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -25,7 +26,6 @@ from ufc.models.calibrate import PLATT
 from ufc.models.design import FeatureSpec
 from ufc.models.recipe import Recipe, fit_recipe
 from ufc.models.splits import fit_rows, labelled
-from ufc.predict import publish
 from ufc.predict.backfill import backfill, merged_attributes
 from ufc.predict.predict import feature_store, model_inputs
 from ufc.predict.refresh import refresh
@@ -187,12 +187,13 @@ def world(league, names, model_root, tmp_path):
         "db": db,
         "models": model_root,
         "publish": tmp_path / "publish",
+        "reports": tmp_path / "reports",
         "resolver": resolver_for(league),
         "names": names,
     }
 
 
-def run(world, now=NOW, models=None):
+def run(world, now=NOW, models=None, today=TODAY):
     conn = connect(world["db"])
     try:
         return refresh(
@@ -201,8 +202,9 @@ def run(world, now=NOW, models=None):
             world["resolver"],
             models_root=models or world["models"],
             publish_dir=world["publish"],
-            today=TODAY,
+            today=today,
             now=now,
+            reports_root=world["reports"],
         ), conn.execute(
             "SELECT * FROM upcoming_bouts ORDER BY event_key, card_order"
         ).fetchall()
@@ -218,8 +220,15 @@ def query(world, sql, *args):
         conn.close()
 
 
+UPCOMING = Path("public") / "upcoming.json"
+
+
 def published(world):
-    return json.loads((world["publish"] / publish.FILE_NAME).read_text())
+    return json.loads((world["publish"] / UPCOMING).read_text())
+
+
+def bout_page(world, bout):
+    return json.loads((world["publish"] / "public" / bout["detail"]).read_text())
 
 
 def test_first_refresh_stores_predicts_labels_and_publishes(world):
@@ -257,11 +266,11 @@ def test_first_refresh_stores_predicts_labels_and_publishes(world):
     assert record["staleness"]["missing_events"][0]["page"] == "UFC Past"
     assert record["model"]["version"] == result.model_version
     assert "Wikipedia" in record["attribution"]
-    # Every predicted bout carries its plain-language "why", stored with the
-    # prediction, written for the fighter the prediction favours.
+    # Every predicted bout's page carries its plain-language "why", rendered
+    # from what is stored with the prediction, for the favoured fighter.
     for event in record["events"]:
         for bout in event["bouts"]:
-            why = bout["why"]
+            why = bout_page(world, bout)["why"]
             favoured = bout["predicted_winner"]
             assert why is not None and why["favoured"] == favoured
             if favoured is None:
@@ -419,7 +428,7 @@ def test_an_implausible_card_cancels_nothing(world, broken):
 
 def test_a_failed_schedule_read_changes_nothing_and_publishes_nothing(world):
     run(world)
-    path = world["publish"] / publish.FILE_NAME
+    path = world["publish"] / UPCOMING
     good = path.read_text()
     before = snapshot_state(world)
     world["pages"].fail = True
@@ -438,9 +447,7 @@ def test_without_an_approved_model_nothing_is_predicted_or_published(world, tmp_
     assert result.model_error and "approved.json" in result.model_error
     assert len(bouts) == 7
     assert not query(world, "SELECT * FROM predictions")
-    assert (
-        result.published is None and not (world["publish"] / publish.FILE_NAME).exists()
-    )
+    assert result.published is None and not (world["publish"] / UPCOMING).exists()
 
 
 def test_predictions_are_symmetric(world, league):
