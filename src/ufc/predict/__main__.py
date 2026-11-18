@@ -2,6 +2,8 @@
 
 uv run python -m ufc.predict refresh   read cards from Wikipedia, predict with the
                                        approved model, write data/publish/predictions.json
+uv run python -m ufc.predict show      print stored predictions (read-only)
+uv run python -m ufc.predict matchup   predict a hypothetical bout (read-only, not stored)
 """
 
 from __future__ import annotations
@@ -9,14 +11,15 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shutil
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from ufc.db.connection import connect
 from ufc.ingest import source
 from ufc.models import registry
-from ufc.predict import publish
+from ufc.predict import publish, show
 from ufc.predict.refresh import RefreshResult, refresh
 from ufc.predict.resolve import load_wikipedia_overrides, resolver_from_snapshot
 from ufc.predict.wikipedia import DEFAULT_CACHE, Wikipedia, http_transport
@@ -126,6 +129,62 @@ def run_refresh(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def _today() -> date:
+    return date.today()
+
+
+def _width(args: argparse.Namespace) -> int:
+    return args.width or shutil.get_terminal_size((100, 24)).columns
+
+
+def run_show(args: argparse.Namespace) -> int:
+    try:
+        conn = show.connect_readonly(args.db)
+        try:
+            lines = show.show(conn, _today(), args.event, args.all, _width(args))
+        finally:
+            conn.close()
+    except show.ShowError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print("\n".join(lines).rstrip())
+    return 0
+
+
+def run_matchup(args: argparse.Namespace) -> int:
+    try:
+        on = date.fromisoformat(args.date) if args.date else _today()
+    except ValueError:
+        print(f"--date must be YYYY-MM-DD, got {args.date!r}", file=sys.stderr)
+        return 1
+    if not (args.snapshot / source.FIGHTER_TOTT_FILE).exists():
+        print(
+            f"No snapshot in {args.snapshot}; run the ingest fetch first.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        resolver = resolver_from_snapshot(args.snapshot, load_wikipedia_overrides())
+        conn = show.connect_readonly(args.db)
+        try:
+            result = show.predict_matchup(
+                conn,
+                resolver,
+                args.models,
+                args.fighter_a,
+                args.fighter_b,
+                on,
+                args.weight_class,
+            )
+        finally:
+            conn.close()
+    except show.ShowError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print("\n".join(show.format_hypothetical(result, _width(args))))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
@@ -142,7 +201,32 @@ def main(argv: list[str] | None = None) -> int:
     cmd.add_argument("--models", type=Path, default=registry.DEFAULT_ROOT)
     cmd.add_argument("--publish", type=Path, default=publish.DEFAULT_DIR)
     cmd.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    shown = commands.add_parser("show", help="print stored predictions (read-only)")
+    shown.add_argument("--db", type=Path, default=Path("data/ufc.db"))
+    shown.add_argument(
+        "--width", type=int, default=None, help="default: terminal width"
+    )
+    which = shown.add_mutually_exclusive_group()
+    which.add_argument("--event", help="event name (exact, else a substring)")
+    which.add_argument("--all", action="store_true", help="every stored upcoming card")
+    hyp = commands.add_parser(
+        "matchup", help="predict a hypothetical bout; nothing is stored"
+    )
+    hyp.add_argument("fighter_a")
+    hyp.add_argument("fighter_b")
+    hyp.add_argument("--date", help="YYYY-MM-DD, default today")
+    hyp.add_argument(
+        "--weight-class", help="default: the division they share most recently"
+    )
+    hyp.add_argument("--db", type=Path, default=Path("data/ufc.db"))
+    hyp.add_argument("--snapshot", type=Path, default=Path("data/external/greco"))
+    hyp.add_argument("--models", type=Path, default=registry.DEFAULT_ROOT)
+    hyp.add_argument("--width", type=int, default=None, help="default: terminal width")
     args = parser.parse_args(argv)
+    if args.command == "show":
+        return run_show(args)
+    if args.command == "matchup":
+        return run_matchup(args)
     return run_refresh(args)
 
 
