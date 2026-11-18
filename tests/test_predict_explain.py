@@ -35,6 +35,7 @@ from ufc.predict.explain import (
     STATS,
     TITLES,
     contributions,
+    detail,
     explain,
     explain_bout,
     explain_values,
@@ -141,6 +142,20 @@ def test_correlated_inputs_share_one_reason():
         for n in families
         if families[n] == "record" and n not in ("d_n_fights", "d_cage_min")
     )
+
+
+def test_every_model_input_can_be_written_as_a_reason(build, league):
+    a, b = pairs(league, 1)[0]
+    m = build_matchup(build.store, a, b, ON, "Lightweight")
+    stored = [
+        {k: (None if math.isnan(v) else v) for k, v in side.items()}
+        for side in (m.a, m.b)
+    ]
+    for name in (*FEATURE_NAMES, *ALL_LEVEL_NAMES):
+        group = group_of(name)
+        for f, o in ((m.a, m.b), tuple(stored)):
+            text = detail(group, [(name, 1.0)], f, o)
+            assert text and "nan" not in text.lower().split(), name
 
 
 # --- contributions -----------------------------------------------------------------

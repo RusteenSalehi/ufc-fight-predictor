@@ -419,9 +419,20 @@ def _stat_phrase(p: Parsed, f: Mapping, o: Mapping, with_label: bool = True) -> 
     return ", ".join(parts) + ": " + values
 
 
+def _stat_of(key: str) -> Stat:
+    """The stat behind a per-fighter value, with or without a window suffix
+    (``kd_per15_career`` is ``kd_per15``)."""
+    if key in STATS:
+        return STATS[key]
+    head, _, tail = key.rpartition("_")
+    if tail in WINDOWS and head in STATS:
+        return STATS[head]
+    raise KeyError(f"no stat for {key!r}")
+
+
 def _pair_phrase(p: Parsed, f: Mapping, o: Mapping) -> str:
     pair = PAIR_BY_NAME[p.stem]
-    off, dfn = STATS[pair.offense], STATS[pair.defense]
+    off, dfn = _stat_of(pair.offense), _stat_of(pair.defense)
     return (
         f"{off.label} {_value(off.kind, f.get(pair.offense))} against the "
         f"opponent's {dfn.label} {_value(dfn.kind, o.get(pair.defense))}"
