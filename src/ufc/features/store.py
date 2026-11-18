@@ -26,6 +26,7 @@ from ufc.features.components import (
 from ufc.features.config import DECAY_ORIGIN, FeatureConfig
 from ufc.features.data import BoutFacts, FighterAttrs
 from ufc.features.elo import EloParams, EloTracker
+from ufc.features.performance import PerformanceModel, rated_performance
 from ufc.features.shrink import RatePriors
 
 
@@ -41,12 +42,17 @@ class FittedParams:
     ``age_medians`` holds each weight class's median age, for the age-shape
     candidates (D55). Parameters saved before M4.5 do not have it, and the
     candidates are then NaN; no model fitted before M4.5 reads them.
+    ``performance`` and ``performance_elo`` are the M4.6 performance model
+    and the step sizes of the performance Elo (D63); parameters saved before
+    M4.6 lack them, and the family 16 candidates are then NaN.
     """
 
     elo: EloParams
     league: np.ndarray
     rate_priors: RatePriors | None = None
     age_medians: AgeMedians | None = None
+    performance: PerformanceModel | None = None
+    performance_elo: EloParams | None = None
 
     def to_dict(self) -> dict:
         out = {
@@ -56,17 +62,27 @@ class FittedParams:
         }
         if self.age_medians is not None:
             out["age_medians"] = self.age_medians.to_dict()
+        if self.performance is not None:
+            out["performance"] = self.performance.to_dict()
+        if self.performance_elo is not None:
+            out["performance_elo"] = self.performance_elo.to_dict()
         return out
 
     @classmethod
     def from_dict(cls, raw: Mapping) -> FittedParams:
         priors = raw.get("rate_priors")
         medians = raw.get("age_medians")
+        performance = raw.get("performance")
+        performance_elo = raw.get("performance_elo")
         return cls(
             elo=EloParams(**raw["elo"]),
             league=np.array([raw["league"][name] for name in COMPONENTS], dtype=float),
             rate_priors=RatePriors.from_dict(priors) if priors else None,
             age_medians=AgeMedians.from_dict(medians) if medians else None,
+            performance=PerformanceModel.from_dict(performance)
+            if performance
+            else None,
+            performance_elo=EloParams(**performance_elo) if performance_elo else None,
         )
 
 
@@ -79,9 +95,11 @@ class FighterHistory:
     """
 
     __slots__ = (
+        "actual",
         "cum",
         "cum_w",
         "dates",
+        "deserved",
         "elo_opp",
         "elo_own",
         "opp_ids",
@@ -105,6 +123,10 @@ class FighterHistory:
         # Both ratings from before the bout's date (strength of schedule).
         self.elo_own: list[float] = []
         self.elo_opp: list[float] = []
+        # M4.6 (D63): deserved win probability (NaN without stats) and the
+        # actual score (1, 0, 0.5; NaN for a no contest).
+        self.deserved: list[float] = []
+        self.actual: list[float] = []
         self.vs: dict[str, list[int]] = {}
 
     def index_before(self, ordinal: int) -> int:
@@ -121,6 +143,8 @@ class FighterHistory:
         weight_class: str | None,
         elo_own: float = float("nan"),
         elo_opp: float = float("nan"),
+        deserved: float = float("nan"),
+        actual: float = float("nan"),
     ) -> None:
         self.vs.setdefault(opponent_id, []).append(len(self.dates))
         self.dates.append(ordinal)
@@ -133,9 +157,12 @@ class FighterHistory:
         self.weight_classes.append(weight_class)
         self.elo_own.append(elo_own)
         self.elo_opp.append(elo_opp)
+        self.deserved.append(deserved)
+        self.actual.append(actual)
 
 
 _NO_HISTORY = FighterHistory()
+_ACTUAL = {"win": 1.0, "loss": 0.0, "draw": 0.5}
 
 
 class FeatureStore:
@@ -151,6 +178,12 @@ class FeatureStore:
         self.config = config
         self.params = params
         self.elo = EloTracker(params.elo)
+        # The performance Elo (M4.6, D63); None for parameters saved before.
+        self.performance_elo = (
+            EloTracker(params.performance_elo)
+            if params.performance is not None and params.performance_elo is not None
+            else None
+        )
         self._histories: dict[str, FighterHistory] = {}
         self._prior = config.prior_fights * params.league
         if config.shrink_minutes > 0 and params.rate_priors is None:
@@ -188,9 +221,18 @@ class FeatureStore:
         bouts = list(bouts)
         ordinal = day.toordinal()
         weight = self.decay_weight(ordinal)
+        model = self.params.performance
         for bout in bouts:
             if bout.date != day:
                 raise ValueError(f"bout {bout.bout_id} is not on {day}")
+            pair = model.deserved_pair(bout) if model is not None else None
+            deserved = dict(
+                zip(
+                    (bout.fighter_a_id, bout.fighter_b_id),
+                    pair or (float("nan"), float("nan")),
+                    strict=True,
+                )
+            )
             for fighter_id in (bout.fighter_a_id, bout.fighter_b_id):
                 opponent_id = bout.opponent_of(fighter_id)
                 # Elo has not been advanced yet, so this is the opponent's
@@ -205,8 +247,15 @@ class FeatureStore:
                     bout.weight_class,
                     self.elo.rating(fighter_id),
                     self.elo.rating(opponent_id),
+                    deserved[fighter_id],
+                    _ACTUAL.get(outcome_for(bout, fighter_id), float("nan")),
                 )
         self.elo.commit_date(ordinal, bouts)
+        if self.performance_elo is not None and model is not None:
+            self.performance_elo.commit(
+                ordinal,
+                (r for r in (rated_performance(b, model) for b in bouts) if r),
+            )
         self.last_date = day
 
     def baseline_excluding(

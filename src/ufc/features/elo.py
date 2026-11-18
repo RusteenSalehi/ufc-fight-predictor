@@ -52,6 +52,9 @@ class RatedBout(NamedTuple):
     fighter_b_id: str
     score_a: float  # 1 win, 0 loss, 0.5 draw
     is_finish: bool
+    # B's score when it is not exactly 1 - score_a in floating point: the
+    # performance Elo scores each fighter from his own side (M4.6, D63).
+    score_b: float | None = None
 
 
 def rated_bout(bout: BoutFacts) -> RatedBout | None:
@@ -97,14 +100,16 @@ class EloTracker:
         p = self.params
         delta: dict[str, float] = defaultdict(float)
         seen: dict[str, int] = defaultdict(int)
-        for a, b, score_a, is_finish in bouts:
+        for a, b, score_a, is_finish, score_b in bouts:
+            if score_b is None:
+                score_b = 1.0 - score_a
             rating_a, rating_b = self.rating(a), self.rating(b)
             step = p.k * (p.finish_mult if is_finish else 1.0)
             # Each fighter's surprise is computed from his own side, so the
             # result does not depend on which of the two is listed first.
             for fighter, surprise in (
                 (a, score_a - expected_score(rating_a, rating_b, p.scale)),
-                (b, (1.0 - score_a) - expected_score(rating_b, rating_a, p.scale)),
+                (b, score_b - expected_score(rating_b, rating_a, p.scale)),
             ):
                 provisional = self._rated_bouts[fighter] < p.provisional_bouts
                 delta[fighter] += (
@@ -170,7 +175,7 @@ def _log_loss(days: Sequence[tuple[int, list[RatedBout]]], params: EloParams) ->
     tracker = EloTracker(params)
     total, count = 0.0, 0
     for ordinal, rated in days:
-        for a, b, score_a, _ in rated:
+        for a, b, score_a, _, _ in rated:
             if score_a == 0.5:
                 continue
             winner, loser = (a, b) if score_a == 1.0 else (b, a)

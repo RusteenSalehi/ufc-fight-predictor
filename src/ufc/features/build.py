@@ -39,6 +39,11 @@ from ufc.features.matchup import (
     flags_from,
     matchup_arrays,
 )
+from ufc.features.performance import (
+    PerformanceEloFit,
+    fit_performance_elo,
+    fit_performance_model,
+)
 from ufc.features.shrink import fit_rate_priors
 from ufc.features.store import FeatureStore, FittedParams
 
@@ -75,6 +80,7 @@ class FeatureBuild:
     store: FeatureStore
     params: FittedParams
     elo_fit: EloFit | None  # None when parameters were supplied, not fitted
+    performance_elo_fit: PerformanceEloFit | None = None
 
 
 def fit_params(
@@ -85,16 +91,38 @@ def fit_params(
     """Fit everything that is fitted, on bouts through ``config.train_end``.
 
     ``fighters`` gives the dates of birth for the classes' median ages."""
+    params, elo_fit, _ = fit_all(bouts, config, fighters)
+    return params, elo_fit
+
+
+def fit_all(
+    bouts: list[BoutFacts],
+    config: FeatureConfig,
+    fighters: Mapping[str, FighterAttrs],
+) -> tuple[FittedParams, EloFit, PerformanceEloFit | None]:
+    """``fit_params`` with the record of the performance Elo fit (M4.6)."""
     elo_fit = fit_elo_params(bouts, config.train_end)
     league = fit_league_baseline(bouts, config.train_end)
     rate_priors = fit_rate_priors(bouts, config.train_end)
     age_medians = fit_age_medians(bouts, fighters, config.train_end)
-    return FittedParams(
-        elo=elo_fit.params,
-        league=league,
-        rate_priors=rate_priors,
-        age_medians=age_medians,
-    ), elo_fit
+    performance = fit_performance_model(bouts, config.train_end)
+    performance_elo_fit = (
+        fit_performance_elo(bouts, performance, config.train_end)
+        if performance is not None
+        else None
+    )
+    return (
+        FittedParams(
+            elo=elo_fit.params,
+            league=league,
+            rate_priors=rate_priors,
+            age_medians=age_medians,
+            performance=performance,
+            performance_elo=performance_elo_fit.params if performance_elo_fit else None,
+        ),
+        elo_fit,
+        performance_elo_fit,
+    )
 
 
 def _label(bout: BoutFacts) -> float:
@@ -116,9 +144,9 @@ def build_features(
     """
     config = config or FeatureConfig()
     bouts = list(data.bouts)
-    elo_fit = None
+    elo_fit = performance_elo_fit = None
     if params is None:
-        params, elo_fit = fit_params(bouts, config, data.fighters)
+        params, elo_fit, performance_elo_fit = fit_all(bouts, config, data.fighters)
 
     store = FeatureStore(data.fighters, config, params)
     context: list[tuple] = []
@@ -178,7 +206,13 @@ def build_features(
     frame = pd.concat(
         [frame, flag_frame, feature_frame, level_frame, candidate_frame], axis=1
     )
-    return FeatureBuild(frame=frame, store=store, params=params, elo_fit=elo_fit)
+    return FeatureBuild(
+        frame=frame,
+        store=store,
+        params=params,
+        elo_fit=elo_fit,
+        performance_elo_fit=performance_elo_fit,
+    )
 
 
 def mirror(frame: pd.DataFrame) -> pd.DataFrame:
@@ -252,6 +286,13 @@ def build_meta(build: FeatureBuild, source_commit: str | None) -> dict:
             "train_log_loss": fit.log_loss,
             "n_bouts": fit.n_bouts,
             "last_date": fit.last_date.isoformat() if fit.last_date else None,
+            "on_grid_edge": list(fit.on_grid_edge),
+        }
+    if build.performance_elo_fit is not None:
+        fit = build.performance_elo_fit
+        meta["performance_elo_fit"] = {
+            "train_log_loss": fit.log_loss,
+            "n_bouts": fit.n_bouts,
             "on_grid_edge": list(fit.on_grid_edge),
         }
     return meta

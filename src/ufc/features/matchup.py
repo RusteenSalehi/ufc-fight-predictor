@@ -88,12 +88,13 @@ class Feature(NamedTuple):
     family: str
 
 
-CANDIDATE_FAMILIES: tuple[str, ...] = ("schedule",)
-"""Families built as candidates (D54, D55): "schedule" is the proposed
-family 14 (strength of schedule), which M4.5 did not adopt (D56). Its columns
-are written to the feature table and to ``Matchup``, but they are not in
-``FEATURES``: a model reads them only if its feature list names them, and
-``train`` does not add them."""
+CANDIDATE_FAMILIES: tuple[str, ...] = ("schedule", "performance")
+"""Families built as candidates (D54, D55, D63): "schedule" is the proposed
+family 14 (strength of schedule), which M4.5 did not adopt (D56);
+"performance" is the proposed family 16 of the M4.6 revision (deserved win
+share, luck, performance Elo). Their columns are written to the feature table
+and to ``Matchup``, but they are not in ``FEATURES``: a model reads them only
+if its feature list names them, and ``train`` does not add them."""
 
 LATE_FAMILIES: tuple[str, ...] = ("age_shape",)
 """Families adopted after M4. Their difference columns come after every M4

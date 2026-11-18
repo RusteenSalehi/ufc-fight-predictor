@@ -155,6 +155,10 @@ def test_perturbation_with_fitting_included(data, config, built, params):
     assert changed.params.rate_priors.to_dict() == params.rate_priors.to_dict()
     assert changed.params.age_medians == params.age_medians
     assert params.age_medians is not None
+    # M4.6 (D63): the performance model and its Elo are fitted on training too.
+    assert changed.params.performance == params.performance
+    assert changed.params.performance_elo == params.performance_elo
+    assert params.performance is not None and params.performance_elo is not None
     pd.testing.assert_frame_equal(
         rows_through(changed.frame, config.train_end),
         rows_through(built.frame, config.train_end),
@@ -167,6 +171,8 @@ def test_perturbation_with_fitting_included(data, config, built, params):
     assert truncated.params.rate_priors.to_dict() == params.rate_priors.to_dict()
     assert truncated.params.age_medians == params.age_medians
     assert params.age_medians is not None
+    assert truncated.params.performance == params.performance
+    assert truncated.params.performance_elo == params.performance_elo
 
 
 def _same_event_dates(data) -> list[date]:

@@ -147,6 +147,15 @@ SCALARS: tuple[tuple[str, str], ...] = (
     ("age_past_32", "age_shape"),
     ("age_past_class_median", "age_shape"),
     ("age_rel_class", "aux"),  # source of the age_shape level column
+    # M4.6 candidates, family 16 (D63): written beside the model features,
+    # read by no model unless its feature list names them.
+    ("deserved_career", "performance"),
+    ("deserved_l3", "performance"),
+    ("deserved_decay", "performance"),
+    ("luck_career", "performance"),
+    ("luck_l3", "performance"),
+    ("perf_elo", "performance"),
+    ("deserved_vs_strong", "performance"),
 )
 
 
@@ -317,6 +326,53 @@ def _age_shape(out: np.ndarray, store: FeatureStore, weight_class: str | None) -
     out[POS["age_rel_class"]] = relative
 
 
+def _mean(values: np.ndarray, weights: np.ndarray | None = None) -> float:
+    """Mean (weighted when ``weights`` is given) of the non-NaN values; NaN
+    when there are none or the weights sum to zero."""
+    keep = ~np.isnan(values)
+    if weights is None:
+        return float(values[keep].mean()) if keep.any() else NAN
+    w = weights[keep]
+    total = float(w.sum())
+    return float(w @ values[keep]) / total if total > 0 else NAN
+
+
+def _performance(
+    out: np.ndarray,
+    store: FeatureStore,
+    fighter_id: str,
+    history: FighterHistory,
+    idx: int,
+    ordinal: int,
+) -> None:
+    """Family 16 (M4.6, D63), from bouts strictly before the cutoff.
+
+    Deserved share: mean deserved win probability over earlier bouts with
+    stats (career, last 3 bouts, time-decayed). Luck: actual score minus
+    deserved, over those bouts that had a result (no contests left out).
+    Against strong opponents: deserved share weighted by how far the
+    opponent's Elo before that bout was above the initial rating. The
+    performance Elo is the rating before the date. All NaN when the
+    parameters have no performance model.
+    """
+    if store.params.performance is None:
+        return
+    deserved = np.array(history.deserved[:idx], dtype=float)
+    luck = np.array(history.actual[:idx], dtype=float) - deserved
+    recent = slice(max(idx - 3, 0), idx)
+    out[POS["deserved_career"]] = _mean(deserved)
+    out[POS["deserved_l3"]] = _mean(deserved[recent])
+    out[POS["deserved_decay"]] = _mean(
+        deserved, np.array(history.weights[:idx], dtype=float)
+    )
+    out[POS["luck_career"]] = _mean(luck)
+    out[POS["luck_l3"]] = _mean(luck[recent])
+    strength = np.array(history.elo_opp[:idx], dtype=float) - store.params.elo.initial
+    out[POS["deserved_vs_strong"]] = _mean(deserved, np.fmax(strength, 0.0))
+    if store.performance_elo is not None:
+        out[POS["perf_elo"]] = store.performance_elo.rating_before(fighter_id, ordinal)
+
+
 def fighter_vector(
     store: FeatureStore, fighter_id: str, ordinal: int, weight_class: str | None
 ) -> np.ndarray:
@@ -384,5 +440,6 @@ def fighter_vector(
     _cardio(out, career, decay)
     _schedule(out, history, idx)
     _age_shape(out, store, weight_class)
+    _performance(out, store, fighter_id, history, idx, ordinal)
     out[_SL_ADJUSTED] = adjusted_stats(store, fighter_id, history, idx, ordinal)
     return out
