@@ -59,6 +59,7 @@ Do not create `web/`, `infra/`, or `analyst/` until the roadmap reaches them.
 - `uv run python -m ufc.models refit` fits the candidate's recipe on every completed bout and saves a new version whose manifest has a `lineage` entry (DECISIONS D47). A refit has no held-out test; `evaluate` refuses it. Its only out-of-sample evidence is live predictions. The Platt slope uses the rolling 2023-onward window by default (D58); `--calibration-window recent` is the D47 window. The refit record compares the new refit with the approved model when there is one.
 - `uv run python -m ufc.models report` rewrites the generated block of `docs/MODEL_REPORT.md`. Numbers in that file's hand-written part must come from the block.
 - `data/models/approved.json` is edited by the user only. No code and no session writes it.
+- `uv run python -m ufc.predict show` and `... matchup "A" "B"` are read-only (DECISIONS D60): they open the database read-only and never write `predictions` or `data/publish/`. `matchup` output is hypothetical and is never stored.
 - `uv run python -m ufc.predict refresh` reads upcoming cards from Wikipedia and predicts with the model `approved.json` names (DECISIONS D48 to D53). Without an approved model it stores cards but predicts and publishes nothing. When it reports provisional fighters or unresolved bouts, check them; a fix is an override with evidence in `src/ufc/predict/wikipedia_overrides.csv`, never fuzzy matching.
 
 ## Hard rules
