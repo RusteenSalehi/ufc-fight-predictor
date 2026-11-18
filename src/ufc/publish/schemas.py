@@ -53,8 +53,14 @@ def winner_of(p_a: float, p_b: float) -> Side | None:
 
 
 class Strict(BaseModel):
+    # The last setting affects only the exported JSON Schema (``jsonschema.py``):
+    # a field with a default is always written, so readers may rely on it.
     model_config = ConfigDict(
-        extra="forbid", allow_inf_nan=False, frozen=True, populate_by_name=True
+        extra="forbid",
+        allow_inf_nan=False,
+        frozen=True,
+        populate_by_name=True,
+        json_schema_serialization_defaults_required=True,
     )
 
 

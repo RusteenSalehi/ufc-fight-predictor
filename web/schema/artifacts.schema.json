@@ -1,0 +1,2001 @@
+{
+  "$defs": {
+    "Backtest": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_version": {
+          "type": "string"
+        },
+        "commands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "production_note": {
+          "type": "string"
+        },
+        "production_version": {
+          "type": "string"
+        },
+        "reports": {
+          "type": "string"
+        },
+        "test_period": {
+          "$ref": "#/$defs/HeldOutPeriod"
+        },
+        "walk_forward": {
+          "$ref": "#/$defs/WalkForward"
+        }
+      },
+      "required": [
+        "label",
+        "reports",
+        "commands",
+        "candidate_version",
+        "production_version",
+        "production_note",
+        "test_period",
+        "walk_forward"
+      ],
+      "title": "Backtest",
+      "type": "object"
+    },
+    "BoutArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "type": "string"
+        },
+        "bout_id": {
+          "pattern": "^wb[0-9a-f]{16}$",
+          "type": "string"
+        },
+        "event": {
+          "$ref": "#/$defs/EventInfo"
+        },
+        "fighter_a": {
+          "$ref": "#/$defs/Fighter"
+        },
+        "fighter_b": {
+          "$ref": "#/$defs/Fighter"
+        },
+        "generated_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+          "type": "string"
+        },
+        "kind": {
+          "const": "bout",
+          "default": "bout",
+          "type": "string"
+        },
+        "limited_data": {
+          "$ref": "#/$defs/LimitedData"
+        },
+        "market": {
+          "$ref": "#/$defs/Market"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "prediction": {
+          "$ref": "#/$defs/Prediction"
+        },
+        "recent_bouts": {
+          "$ref": "#/$defs/RecentBouts"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "segment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stats": {
+          "$ref": "#/$defs/Stats"
+        },
+        "title_bout": {
+          "type": "boolean"
+        },
+        "top_factors": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TopFactors"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "weight_class": {
+          "type": "string"
+        },
+        "why": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Why"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "generated_at",
+        "kind",
+        "bout_id",
+        "event",
+        "order",
+        "segment",
+        "weight_class",
+        "title_bout",
+        "fighter_a",
+        "fighter_b",
+        "prediction",
+        "limited_data",
+        "why",
+        "top_factors",
+        "stats",
+        "recent_bouts",
+        "market",
+        "attribution"
+      ],
+      "title": "BoutArtifact",
+      "type": "object"
+    },
+    "CalibrationRow": {
+      "additionalProperties": false,
+      "properties": {
+        "favourite_win_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "high": {
+          "type": "number"
+        },
+        "log_loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "low": {
+          "type": "number"
+        },
+        "mean_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "n": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "win_rate_high": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "win_rate_low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "low",
+        "high",
+        "n",
+        "mean_confidence",
+        "favourite_win_rate",
+        "win_rate_low",
+        "win_rate_high",
+        "log_loss"
+      ],
+      "title": "CalibrationRow",
+      "type": "object"
+    },
+    "Dataset": {
+      "additionalProperties": false,
+      "properties": {
+        "last_event": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source_commit",
+        "last_event"
+      ],
+      "title": "Dataset",
+      "type": "object"
+    },
+    "EraShift": {
+      "additionalProperties": false,
+      "properties": {
+        "backtest_log_loss": {
+          "type": "number"
+        },
+        "backtest_year_range": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        "backtest_years": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "type": "array"
+        },
+        "test_period_log_loss": {
+          "type": "number"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "backtest_years",
+        "backtest_log_loss",
+        "backtest_year_range",
+        "test_period_log_loss"
+      ],
+      "title": "EraShift",
+      "type": "object"
+    },
+    "EventInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "date": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "event_key": {
+          "pattern": "^wp:\\d+$",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "wikipedia_page": {
+          "type": "string"
+        },
+        "wikipedia_revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "event_key",
+        "name",
+        "date",
+        "wikipedia_page",
+        "wikipedia_revision"
+      ],
+      "title": "EventInfo",
+      "type": "object"
+    },
+    "Fighter": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "provisional": {
+          "type": "boolean"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolution": {
+          "type": "string"
+        },
+        "wikipedia_page": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "ref",
+        "provisional",
+        "wikipedia_page",
+        "resolution"
+      ],
+      "title": "Fighter",
+      "type": "object"
+    },
+    "FighterBrief": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "provisional": {
+          "type": "boolean"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wikipedia_page": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "ref",
+        "provisional",
+        "wikipedia_page"
+      ],
+      "title": "FighterBrief",
+      "type": "object"
+    },
+    "Fold": {
+      "additionalProperties": false,
+      "properties": {
+        "in_test_period": {
+          "type": "boolean"
+        },
+        "metrics": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Metrics"
+          },
+          "type": "object"
+        },
+        "n_scored": {
+          "type": "integer"
+        },
+        "year": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "year",
+        "in_test_period",
+        "n_scored",
+        "metrics"
+      ],
+      "title": "Fold",
+      "type": "object"
+    },
+    "HeldOutPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "already_seen": {
+          "type": "boolean"
+        },
+        "already_seen_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calibration": {
+          "items": {
+            "$ref": "#/$defs/CalibrationRow"
+          },
+          "type": "array"
+        },
+        "calibration_buckets": {
+          "type": "string"
+        },
+        "candidate_version": {
+          "type": "string"
+        },
+        "first_date": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "last_date": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "metrics": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Metrics"
+          },
+          "type": "object"
+        },
+        "n_no_result": {
+          "type": "integer"
+        },
+        "n_scored": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "candidate_version",
+        "first_date",
+        "last_date",
+        "n_scored",
+        "n_no_result",
+        "already_seen",
+        "already_seen_note",
+        "metrics",
+        "calibration",
+        "calibration_buckets"
+      ],
+      "title": "HeldOutPeriod",
+      "type": "object"
+    },
+    "LimitedData": {
+      "additionalProperties": false,
+      "properties": {
+        "limited": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stale_stats": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "limited",
+        "reasons",
+        "stale_stats"
+      ],
+      "title": "LimitedData",
+      "type": "object"
+    },
+    "LiveBout": {
+      "additionalProperties": false,
+      "properties": {
+        "bout_id": {
+          "pattern": "^wb[0-9a-f]{16}$",
+          "type": "string"
+        },
+        "brier": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_date": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "event_key": {
+          "pattern": "^wp:\\d+$",
+          "type": "string"
+        },
+        "event_name": {
+          "type": "string"
+        },
+        "fighter_a": {
+          "type": "string"
+        },
+        "fighter_b": {
+          "type": "string"
+        },
+        "limited_data": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "log_loss": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "fighter_a",
+                "fighter_b",
+                "draw",
+                "nc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "p_fighter_a": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "predicted_at": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prediction_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result_bout_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "scored",
+            "no_result",
+            "pending",
+            "cancelled",
+            "no_live_prediction",
+            "not_found",
+            "unlinked"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "bout_id",
+        "event_key",
+        "event_name",
+        "event_date",
+        "fighter_a",
+        "fighter_b",
+        "status",
+        "detail",
+        "prediction_id",
+        "model_version",
+        "predicted_at",
+        "p_fighter_a",
+        "limited_data",
+        "result_bout_id",
+        "outcome",
+        "log_loss",
+        "brier",
+        "correct"
+      ],
+      "title": "LiveBout",
+      "type": "object"
+    },
+    "LiveRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "bouts": {
+          "items": {
+            "$ref": "#/$defs/LiveBout"
+          },
+          "type": "array"
+        },
+        "by_model_version": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Metrics"
+          },
+          "type": "object"
+        },
+        "calibration": {
+          "items": {
+            "$ref": "#/$defs/CalibrationRow"
+          },
+          "type": "array"
+        },
+        "calibration_buckets": {
+          "type": "string"
+        },
+        "counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "enum": [
+              "scored",
+              "no_result",
+              "pending",
+              "cancelled",
+              "no_live_prediction",
+              "not_found",
+              "unlinked"
+            ]
+          },
+          "type": "object"
+        },
+        "label": {
+          "type": "string"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Metrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metrics_without_limited_data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Metrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "label",
+        "rules",
+        "counts",
+        "metrics",
+        "metrics_without_limited_data",
+        "by_model_version",
+        "calibration",
+        "calibration_buckets",
+        "bouts"
+      ],
+      "title": "LiveRecord",
+      "type": "object"
+    },
+    "Market": {
+      "additionalProperties": false,
+      "description": "Market odds for the bout. Null until odds are matched to bouts (M12);\nthe fields exist now so that filling them is not a schema change.",
+      "properties": {
+        "bookmaker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "captured_at": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fighter_a_american": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fighter_b_american": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "p_fighter_a_no_vig": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "p_fighter_b_no_vig": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "source",
+        "bookmaker",
+        "captured_at",
+        "fighter_a_american",
+        "fighter_b_american",
+        "p_fighter_a_no_vig",
+        "p_fighter_b_no_vig"
+      ],
+      "title": "Market",
+      "type": "object"
+    },
+    "Metrics": {
+      "additionalProperties": false,
+      "properties": {
+        "accuracy": {
+          "type": "number"
+        },
+        "brier": {
+          "type": "number"
+        },
+        "ece": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "log_loss": {
+          "type": "number"
+        },
+        "log_loss_high": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "log_loss_low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "n": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "n",
+        "log_loss",
+        "brier",
+        "accuracy",
+        "ece",
+        "log_loss_low",
+        "log_loss_high"
+      ],
+      "title": "Metrics",
+      "type": "object"
+    },
+    "MissingEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "bouts": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "date": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "page": {
+          "type": "string"
+        },
+        "read": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "page",
+        "date",
+        "read",
+        "bouts"
+      ],
+      "title": "MissingEvent",
+      "type": "object"
+    },
+    "ModelInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "parent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "status",
+        "parent"
+      ],
+      "title": "ModelInfo",
+      "type": "object"
+    },
+    "Moneyline": {
+      "additionalProperties": false,
+      "properties": {
+        "fighter_a": {
+          "type": "number"
+        },
+        "fighter_b": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "fighter_a",
+        "fighter_b"
+      ],
+      "title": "Moneyline",
+      "type": "object"
+    },
+    "PastBout": {
+      "additionalProperties": false,
+      "properties": {
+        "date": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "deserved_win_probability": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end_round": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event": {
+          "type": "string"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opponent": {
+          "type": "string"
+        },
+        "opponent_id": {
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "win",
+            "loss",
+            "draw",
+            "nc"
+          ],
+          "type": "string"
+        },
+        "title_bout": {
+          "type": "boolean"
+        },
+        "weight_class": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "date",
+        "event",
+        "opponent",
+        "opponent_id",
+        "result",
+        "method",
+        "end_round",
+        "end_time",
+        "weight_class",
+        "title_bout",
+        "deserved_win_probability"
+      ],
+      "title": "PastBout",
+      "type": "object"
+    },
+    "Performance": {
+      "additionalProperties": false,
+      "properties": {
+        "backtest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Backtest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "backtest_unavailable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "era_shift_caveat": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EraShift"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generated_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+          "type": "string"
+        },
+        "kind": {
+          "const": "performance",
+          "default": "performance",
+          "type": "string"
+        },
+        "live": {
+          "$ref": "#/$defs/LiveRecord"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelInfo"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "separation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "generated_at",
+        "kind",
+        "model",
+        "separation",
+        "backtest",
+        "backtest_unavailable",
+        "era_shift_caveat",
+        "live"
+      ],
+      "title": "Performance",
+      "type": "object"
+    },
+    "Pooled": {
+      "additionalProperties": false,
+      "properties": {
+        "metrics": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Metrics"
+          },
+          "type": "object"
+        },
+        "years": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "type": "array"
+        }
+      },
+      "required": [
+        "years",
+        "metrics"
+      ],
+      "title": "Pooled",
+      "type": "object"
+    },
+    "Prediction": {
+      "additionalProperties": false,
+      "properties": {
+        "fair_moneyline": {
+          "$ref": "#/$defs/Moneyline"
+        },
+        "fair_moneyline_note": {
+          "type": "string"
+        },
+        "model_version": {
+          "type": "string"
+        },
+        "p_fighter_a": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "p_fighter_b": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "predicted_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+          "type": "string"
+        },
+        "predicted_winner": {
+          "anyOf": [
+            {
+              "enum": [
+                "fighter_a",
+                "fighter_b"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prediction_id": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prediction_id",
+        "model_version",
+        "predicted_at",
+        "p_fighter_a",
+        "p_fighter_b",
+        "predicted_winner",
+        "fair_moneyline",
+        "fair_moneyline_note"
+      ],
+      "title": "Prediction",
+      "type": "object"
+    },
+    "Reason": {
+      "additionalProperties": false,
+      "properties": {
+        "component": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "log_odds": {
+          "type": "number"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "toward": {
+          "enum": [
+            "fighter_a",
+            "fighter_b"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "component",
+        "title",
+        "toward",
+        "detail",
+        "log_odds",
+        "inputs"
+      ],
+      "title": "Reason",
+      "type": "object"
+    },
+    "RecentBouts": {
+      "additionalProperties": false,
+      "properties": {
+        "fighter_a": {
+          "items": {
+            "$ref": "#/$defs/PastBout"
+          },
+          "maxItems": 5,
+          "type": "array"
+        },
+        "fighter_b": {
+          "items": {
+            "$ref": "#/$defs/PastBout"
+          },
+          "maxItems": 5,
+          "type": "array"
+        },
+        "note": {
+          "type": "string"
+        },
+        "performance_model": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "note",
+        "performance_model",
+        "fighter_a",
+        "fighter_b"
+      ],
+      "title": "RecentBouts",
+      "type": "object"
+    },
+    "Staleness": {
+      "additionalProperties": false,
+      "properties": {
+        "dataset_last_event": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "missing_events": {
+          "items": {
+            "$ref": "#/$defs/MissingEvent"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "current",
+            "behind",
+            "unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "dataset_last_event",
+        "missing_events"
+      ],
+      "title": "Staleness",
+      "type": "object"
+    },
+    "StatRow": {
+      "additionalProperties": false,
+      "properties": {
+        "fighter_a": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fighter_b": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "group": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "shrunk": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "group",
+        "label",
+        "kind",
+        "fighter_a",
+        "fighter_b",
+        "shrunk"
+      ],
+      "title": "StatRow",
+      "type": "object"
+    },
+    "Stats": {
+      "additionalProperties": false,
+      "properties": {
+        "attribute_sources": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object"
+          },
+          "propertyNames": {
+            "enum": [
+              "fighter_a",
+              "fighter_b"
+            ]
+          },
+          "type": "object"
+        },
+        "note": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/StatRow"
+          },
+          "type": "array"
+        },
+        "shrink_minutes": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stance": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "propertyNames": {
+            "enum": [
+              "fighter_a",
+              "fighter_b"
+            ]
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "note",
+        "shrink_minutes",
+        "stance",
+        "attribute_sources",
+        "rows"
+      ],
+      "title": "Stats",
+      "type": "object"
+    },
+    "TopFactors": {
+      "additionalProperties": false,
+      "properties": {
+        "fighter_a": {
+          "items": {
+            "$ref": "#/$defs/Reason"
+          },
+          "type": "array"
+        },
+        "fighter_b": {
+          "items": {
+            "$ref": "#/$defs/Reason"
+          },
+          "type": "array"
+        },
+        "method": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fighter_a",
+        "fighter_b",
+        "method"
+      ],
+      "title": "TopFactors",
+      "type": "object"
+    },
+    "UnpredictedBout": {
+      "additionalProperties": false,
+      "properties": {
+        "bout_id": {
+          "pattern": "^wb[0-9a-f]{16}$",
+          "type": "string"
+        },
+        "fighter_a": {
+          "$ref": "#/$defs/FighterBrief"
+        },
+        "fighter_b": {
+          "$ref": "#/$defs/FighterBrief"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "segment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "unresolved",
+            "not_predicted"
+          ],
+          "type": "string"
+        },
+        "title_bout": {
+          "type": "boolean"
+        },
+        "weight_class": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bout_id",
+        "order",
+        "segment",
+        "weight_class",
+        "title_bout",
+        "fighter_a",
+        "fighter_b",
+        "status",
+        "reason"
+      ],
+      "title": "UnpredictedBout",
+      "type": "object"
+    },
+    "Upcoming": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "type": "string"
+        },
+        "dataset": {
+          "$ref": "#/$defs/Dataset"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/UpcomingEvent"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "generated_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+          "type": "string"
+        },
+        "kind": {
+          "const": "upcoming",
+          "default": "upcoming",
+          "type": "string"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelInfo"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "type": "integer"
+        },
+        "staleness": {
+          "$ref": "#/$defs/Staleness"
+        }
+      },
+      "required": [
+        "schema_version",
+        "generated_at",
+        "kind",
+        "model",
+        "dataset",
+        "staleness",
+        "events",
+        "attribution"
+      ],
+      "title": "Upcoming",
+      "type": "object"
+    },
+    "UpcomingBout": {
+      "additionalProperties": false,
+      "properties": {
+        "bout_id": {
+          "pattern": "^wb[0-9a-f]{16}$",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "fighter_a": {
+          "$ref": "#/$defs/FighterBrief"
+        },
+        "fighter_b": {
+          "$ref": "#/$defs/FighterBrief"
+        },
+        "limited_data": {
+          "type": "boolean"
+        },
+        "limited_data_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "model_version": {
+          "type": "string"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "p_fighter_a": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "p_fighter_b": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "predicted_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+          "type": "string"
+        },
+        "predicted_winner": {
+          "anyOf": [
+            {
+              "enum": [
+                "fighter_a",
+                "fighter_b"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "segment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stale_stats": {
+          "type": "boolean"
+        },
+        "status": {
+          "const": "predicted",
+          "default": "predicted",
+          "type": "string"
+        },
+        "title_bout": {
+          "type": "boolean"
+        },
+        "weight_class": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bout_id",
+        "order",
+        "segment",
+        "weight_class",
+        "title_bout",
+        "fighter_a",
+        "fighter_b",
+        "status",
+        "p_fighter_a",
+        "p_fighter_b",
+        "predicted_winner",
+        "model_version",
+        "predicted_at",
+        "limited_data",
+        "limited_data_reasons",
+        "stale_stats",
+        "detail"
+      ],
+      "title": "UpcomingBout",
+      "type": "object"
+    },
+    "UpcomingEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "bouts": {
+          "items": {
+            "$ref": "#/$defs/UpcomingBout"
+          },
+          "type": "array"
+        },
+        "card_checked_at": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "event_key": {
+          "pattern": "^wp:\\d+$",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "unresolved_bouts": {
+          "items": {
+            "$ref": "#/$defs/UnpredictedBout"
+          },
+          "type": "array"
+        },
+        "wikipedia_page": {
+          "type": "string"
+        },
+        "wikipedia_revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "event_key",
+        "name",
+        "date",
+        "wikipedia_page",
+        "wikipedia_revision",
+        "card_checked_at",
+        "bouts",
+        "unresolved_bouts"
+      ],
+      "title": "UpcomingEvent",
+      "type": "object"
+    },
+    "WalkForward": {
+      "additionalProperties": false,
+      "properties": {
+        "folds": {
+          "items": {
+            "$ref": "#/$defs/Fold"
+          },
+          "type": "array"
+        },
+        "pooled_before_test_period": {
+          "$ref": "#/$defs/Pooled"
+        },
+        "pooled_test_period": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pooled"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schedule": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schedule",
+        "folds",
+        "pooled_before_test_period",
+        "pooled_test_period"
+      ],
+      "title": "WalkForward",
+      "type": "object"
+    },
+    "Why": {
+      "additionalProperties": false,
+      "properties": {
+        "against": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "favoured": {
+          "anyOf": [
+            {
+              "enum": [
+                "fighter_a",
+                "fighter_b"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "favoured_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "for": {
+          "items": {
+            "$ref": "#/$defs/Reason"
+          },
+          "maxItems": 3,
+          "type": "array"
+        },
+        "method": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "favoured",
+        "favoured_name",
+        "for",
+        "against",
+        "summary",
+        "method"
+      ],
+      "title": "Why",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The JSON files the site reads, generated from ufc.publish.schemas (schema_version 1). Do not edit; run `uv run python -m ufc.publish schema`.",
+  "properties": {
+    "bout": {
+      "$ref": "#/$defs/BoutArtifact"
+    },
+    "performance": {
+      "$ref": "#/$defs/Performance"
+    },
+    "upcoming": {
+      "$ref": "#/$defs/Upcoming"
+    }
+  },
+  "required": [
+    "upcoming",
+    "bout",
+    "performance"
+  ],
+  "title": "PublicArtifacts",
+  "type": "object"
+}
