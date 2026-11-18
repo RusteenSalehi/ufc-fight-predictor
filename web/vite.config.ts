@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
-import { publishData } from './vite.publish-data'
+import { publishData } from './vite.publish-data.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 // Where `uv run python -m ufc.predict refresh` writes the public artifacts.
