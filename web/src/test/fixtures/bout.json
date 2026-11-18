@@ -1,0 +1,308 @@
+{
+  "schema_version": 1,
+  "generated_at": "2099-01-02T12:00:00Z",
+  "kind": "bout",
+  "bout_id": "wb0000000000000001",
+  "event": {
+    "event_key": "wp:1001",
+    "name": "Test Fight Night: Stone vs. Vale",
+    "date": "2099-01-10",
+    "wikipedia_page": "Test Fight Night: Stone vs. Vale",
+    "wikipedia_revision": 1
+  },
+  "order": 0,
+  "segment": "Main card",
+  "weight_class": "Middleweight",
+  "title_bout": true,
+  "fighter_a": {
+    "name": "Avery Stone",
+    "ref": "aaaaaaaaaaaaaaa1",
+    "provisional": false,
+    "wikipedia_page": "Avery Stone",
+    "resolution": "name"
+  },
+  "fighter_b": {
+    "name": "Bruno Vale",
+    "ref": "aaaaaaaaaaaaaaa2",
+    "provisional": false,
+    "wikipedia_page": "Bruno Vale",
+    "resolution": "name"
+  },
+  "prediction": {
+    "prediction_id": 1,
+    "model_version": "xgboost-0000aaaa-1111bbbb",
+    "predicted_at": "2099-01-02T11:30:00Z",
+    "p_fighter_a": 0.3,
+    "p_fighter_b": 0.7,
+    "predicted_winner": "fighter_b",
+    "fair_moneyline": {
+      "fighter_a": 233.33,
+      "fighter_b": -233.33
+    },
+    "fair_moneyline_note": "Synthetic note: a conversion, not a price."
+  },
+  "limited_data": {
+    "limited": false,
+    "reasons": [],
+    "stale_stats": false
+  },
+  "why": {
+    "favoured": "fighter_b",
+    "favoured_name": "Bruno Vale",
+    "for": [
+      {
+        "reason": "age",
+        "component": null,
+        "title": "the age gap",
+        "toward": "fighter_b",
+        "detail": "4.0 years younger (28.0 vs 32.0)",
+        "log_odds": 0.4,
+        "inputs": [
+          "d_age"
+        ]
+      },
+      {
+        "reason": "sapm",
+        "component": null,
+        "title": "strikes absorbed per minute",
+        "toward": "fighter_b",
+        "detail": "2.10 vs 3.40",
+        "log_odds": 0.25,
+        "inputs": [
+          "d_sapm"
+        ]
+      },
+      {
+        "reason": "record",
+        "component": null,
+        "title": "the UFC record",
+        "toward": "fighter_b",
+        "detail": "win rate 80% vs 60%",
+        "log_odds": 0.1,
+        "inputs": [
+          "d_record"
+        ]
+      }
+    ],
+    "against": {
+      "reason": "rating",
+      "component": null,
+      "title": "the opposition faced",
+      "toward": "fighter_a",
+      "detail": "past opponents rated 90 higher",
+      "log_odds": 0.2,
+      "inputs": [
+        "d_rating"
+      ]
+    },
+    "summary": "The model favours Bruno Vale (70%). Synthetic summary.",
+    "method": "Synthetic method note: contributions to the model's log-odds."
+  },
+  "top_factors": {
+    "fighter_a": [
+      {
+        "reason": "rating",
+        "component": null,
+        "title": "the opposition faced",
+        "toward": "fighter_a",
+        "detail": "past opponents rated 90 higher",
+        "log_odds": 0.2,
+        "inputs": [
+          "d_rating"
+        ]
+      },
+      {
+        "reason": "reach",
+        "component": null,
+        "title": "reach",
+        "toward": "fighter_a",
+        "detail": "5 cm longer (193 vs 188)",
+        "log_odds": 0.05,
+        "inputs": [
+          "d_reach"
+        ]
+      }
+    ],
+    "fighter_b": [
+      {
+        "reason": "age",
+        "component": null,
+        "title": "the age gap",
+        "toward": "fighter_b",
+        "detail": "4.0 years younger (28.0 vs 32.0)",
+        "log_odds": 0.4,
+        "inputs": [
+          "d_age"
+        ]
+      },
+      {
+        "reason": "sapm",
+        "component": null,
+        "title": "strikes absorbed per minute",
+        "toward": "fighter_b",
+        "detail": "2.10 vs 3.40",
+        "log_odds": 0.25,
+        "inputs": [
+          "d_sapm"
+        ]
+      },
+      {
+        "reason": "record",
+        "component": null,
+        "title": "the UFC record",
+        "toward": "fighter_b",
+        "detail": "win rate 80% vs 60%",
+        "log_odds": 0.1,
+        "inputs": [
+          "d_record"
+        ]
+      }
+    ],
+    "method": "Synthetic method note: contributions to the model's log-odds."
+  },
+  "stats": {
+    "note": "Synthetic stats note.",
+    "shrink_minutes": 15.0,
+    "stance": {
+      "fighter_a": "Orthodox",
+      "fighter_b": "Southpaw"
+    },
+    "attribute_sources": {
+      "fighter_a": {
+        "dob": "upstream",
+        "height_cm": "upstream",
+        "reach_cm": "upstream"
+      },
+      "fighter_b": {
+        "dob": "upstream",
+        "height_cm": "wikipedia",
+        "reach_cm": null
+      }
+    },
+    "rows": [
+      {
+        "key": "age",
+        "group": "physical",
+        "label": "age",
+        "kind": "years",
+        "fighter_a": 32.0,
+        "fighter_b": 28.0,
+        "shrunk": false
+      },
+      {
+        "key": "height_cm",
+        "group": "physical",
+        "label": "height",
+        "kind": "cm",
+        "fighter_a": 185.0,
+        "fighter_b": 183.0,
+        "shrunk": false
+      },
+      {
+        "key": "reach_cm",
+        "group": "physical",
+        "label": "reach",
+        "kind": "cm",
+        "fighter_a": 193.0,
+        "fighter_b": null,
+        "shrunk": false
+      },
+      {
+        "key": "wins",
+        "group": "record",
+        "label": "UFC wins",
+        "kind": "count",
+        "fighter_a": 6.0,
+        "fighter_b": 8.0,
+        "shrunk": false
+      },
+      {
+        "key": "elo",
+        "group": "rating",
+        "label": "rating",
+        "kind": "elo",
+        "fighter_a": 1620.4,
+        "fighter_b": 1588.9,
+        "shrunk": false
+      },
+      {
+        "key": "slpm_career",
+        "group": "striking",
+        "label": "strikes landed per minute",
+        "kind": "rate",
+        "fighter_a": 4.123,
+        "fighter_b": 3.456,
+        "shrunk": true
+      },
+      {
+        "key": "td_def_career",
+        "group": "grappling",
+        "label": "takedown defence",
+        "kind": "pct",
+        "fighter_a": 0.7,
+        "fighter_b": 0.55,
+        "shrunk": false
+      }
+    ]
+  },
+  "recent_bouts": {
+    "note": "Synthetic note: a description of past fights, not a model input.",
+    "performance_model": {
+      "train_end": "2098-12-31",
+      "n_decisions": 10
+    },
+    "fighter_a": [
+      {
+        "date": "2098-10-01",
+        "event": "Test event 2098-10-01",
+        "opponent": "Cole Ward",
+        "opponent_id": "bbbbbbbbbbbbbbb9",
+        "result": "win",
+        "method": "Decision - Unanimous",
+        "end_round": 3,
+        "end_time": "5:00",
+        "weight_class": "Middleweight",
+        "title_bout": false,
+        "deserved_win_probability": 0.81
+      },
+      {
+        "date": "2098-05-01",
+        "event": "Test event 2098-05-01",
+        "opponent": "Dan Price",
+        "opponent_id": "bbbbbbbbbbbbbbb9",
+        "result": "loss",
+        "method": "KO/TKO",
+        "end_round": 1,
+        "end_time": "2:10",
+        "weight_class": "Middleweight",
+        "title_bout": false,
+        "deserved_win_probability": 0.12
+      }
+    ],
+    "fighter_b": [
+      {
+        "date": "2098-11-01",
+        "event": "Test event 2098-11-01",
+        "opponent": "Eli Frost",
+        "opponent_id": "bbbbbbbbbbbbbbb9",
+        "result": "win",
+        "method": "Submission",
+        "end_round": 2,
+        "end_time": "2:10",
+        "weight_class": "Middleweight",
+        "title_bout": false,
+        "deserved_win_probability": null
+      }
+    ]
+  },
+  "market": {
+    "source": null,
+    "bookmaker": null,
+    "captured_at": null,
+    "fighter_a_american": null,
+    "fighter_b_american": null,
+    "p_fighter_a_no_vig": null,
+    "p_fighter_b_no_vig": null
+  },
+  "attribution": "Synthetic test data. No real fighters, events or results."
+}

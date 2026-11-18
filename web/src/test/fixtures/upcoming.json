@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "generated_at": "2099-01-02T12:00:00Z",
+  "kind": "upcoming",
+  "model": {
+    "version": "xgboost-0000aaaa-1111bbbb",
+    "status": "synthetic",
+    "parent": "xgboost-2222cccc-3333dddd"
+  },
+  "dataset": {
+    "source_commit": "0000000000000000000000000000000000000000",
+    "last_event": "2099-01-01"
+  },
+  "staleness": {
+    "status": "current",
+    "dataset_last_event": "2099-01-01",
+    "missing_events": []
+  },
+  "events": [
+    {
+      "event_key": "wp:1001",
+      "name": "Test Fight Night: Stone vs. Vale",
+      "date": "2099-01-10",
+      "wikipedia_page": "Test Fight Night: Stone vs. Vale",
+      "wikipedia_revision": 1,
+      "card_checked_at": "2099-01-02T12:00:00Z",
+      "bouts": [
+        {
+          "bout_id": "wb0000000000000001",
+          "order": 0,
+          "segment": "Main card",
+          "weight_class": "Middleweight",
+          "title_bout": true,
+          "fighter_a": {
+            "name": "Avery Stone",
+            "ref": "aaaaaaaaaaaaaaa1",
+            "provisional": false,
+            "wikipedia_page": "Avery Stone"
+          },
+          "fighter_b": {
+            "name": "Bruno Vale",
+            "ref": "aaaaaaaaaaaaaaa2",
+            "provisional": false,
+            "wikipedia_page": "Bruno Vale"
+          },
+          "status": "predicted",
+          "p_fighter_a": 0.3,
+          "p_fighter_b": 0.7,
+          "predicted_winner": "fighter_b",
+          "model_version": "xgboost-0000aaaa-1111bbbb",
+          "predicted_at": "2099-01-02T11:30:00Z",
+          "limited_data": false,
+          "limited_data_reasons": [],
+          "stale_stats": false,
+          "detail": "bouts/wb0000000000000001.json"
+        },
+        {
+          "bout_id": "wb0000000000000002",
+          "order": 1,
+          "segment": "Main card",
+          "weight_class": "Lightweight",
+          "title_bout": false,
+          "fighter_a": {
+            "name": "Kade Moreno",
+            "ref": "aaaaaaaaaaaaaaa3",
+            "provisional": false,
+            "wikipedia_page": "Kade Moreno"
+          },
+          "fighter_b": {
+            "name": "Tomas Newman",
+            "ref": "wpname:Tomas Newman",
+            "provisional": true,
+            "wikipedia_page": "Tomas Newman"
+          },
+          "status": "predicted",
+          "p_fighter_a": 0.62,
+          "p_fighter_b": 0.38,
+          "predicted_winner": "fighter_a",
+          "model_version": "xgboost-0000aaaa-1111bbbb",
+          "predicted_at": "2099-01-02T11:30:00Z",
+          "limited_data": true,
+          "limited_data_reasons": [
+            "debut: Tomas Newman has no earlier UFC bout in the dataset",
+            "attribute gap: no height, reach for Tomas Newman"
+          ],
+          "stale_stats": false,
+          "detail": "bouts/wb0000000000000002.json"
+        },
+        {
+          "bout_id": "wb0000000000000003",
+          "order": 2,
+          "segment": "Preliminary card",
+          "weight_class": "Women's Strawweight",
+          "title_bout": false,
+          "fighter_a": {
+            "name": "Iris Reyes",
+            "ref": "aaaaaaaaaaaaaaa4",
+            "provisional": false,
+            "wikipedia_page": "Iris Reyes"
+          },
+          "fighter_b": {
+            "name": "June Holt",
+            "ref": "aaaaaaaaaaaaaaa5",
+            "provisional": false,
+            "wikipedia_page": "June Holt"
+          },
+          "status": "predicted",
+          "p_fighter_a": 0.5,
+          "p_fighter_b": 0.5,
+          "predicted_winner": null,
+          "model_version": "xgboost-0000aaaa-1111bbbb",
+          "predicted_at": "2099-01-02T11:30:00Z",
+          "limited_data": true,
+          "limited_data_reasons": [
+            "stale stats: June Holt fought at an event the dataset lacks"
+          ],
+          "stale_stats": true,
+          "detail": "bouts/wb0000000000000003.json"
+        }
+      ],
+      "unresolved_bouts": [
+        {
+          "bout_id": "wb0000000000000004",
+          "order": 3,
+          "segment": "Preliminary card",
+          "weight_class": "Flyweight",
+          "title_bout": false,
+          "fighter_a": {
+            "name": "Sam Park",
+            "ref": null,
+            "provisional": false,
+            "wikipedia_page": "Sam Park"
+          },
+          "fighter_b": {
+            "name": "Sam Park Jr.",
+            "ref": null,
+            "provisional": false,
+            "wikipedia_page": "Sam Park Jr."
+          },
+          "status": "unresolved",
+          "reason": "ambiguous name: Sam Park"
+        }
+      ]
+    },
+    {
+      "event_key": "wp:1002",
+      "name": "Test 900: Okafor vs. Lind",
+      "date": "2099-02-07",
+      "wikipedia_page": "Test 900: Okafor vs. Lind",
+      "wikipedia_revision": 2,
+      "card_checked_at": "2099-01-02T12:00:00Z",
+      "bouts": [
+        {
+          "bout_id": "wb0000000000000005",
+          "order": 0,
+          "segment": "Main card",
+          "weight_class": "Heavyweight",
+          "title_bout": false,
+          "fighter_a": {
+            "name": "Dele Okafor",
+            "ref": "aaaaaaaaaaaaaaa6",
+            "provisional": false,
+            "wikipedia_page": "Dele Okafor"
+          },
+          "fighter_b": {
+            "name": "Eric Lind",
+            "ref": "aaaaaaaaaaaaaaa7",
+            "provisional": false,
+            "wikipedia_page": "Eric Lind"
+          },
+          "status": "predicted",
+          "p_fighter_a": 0.71,
+          "p_fighter_b": 0.29000000000000004,
+          "predicted_winner": "fighter_a",
+          "model_version": "xgboost-0000aaaa-1111bbbb",
+          "predicted_at": "2099-01-02T11:30:00Z",
+          "limited_data": false,
+          "limited_data_reasons": [],
+          "stale_stats": false,
+          "detail": "bouts/wb0000000000000005.json"
+        }
+      ],
+      "unresolved_bouts": []
+    }
+  ],
+  "attribution": "Synthetic test data. No real fighters, events or results."
+}

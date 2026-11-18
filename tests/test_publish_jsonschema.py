@@ -3,13 +3,18 @@
 from ``ufc.publish.schemas``, and check that the site's synthetic test
 fixtures are valid artifacts."""
 
+import json
 from pathlib import Path
+
+import pytest
 
 from ufc.publish import jsonschema
 from ufc.publish.__main__ import main
+from ufc.publish.schemas import BoutArtifact, Performance, Upcoming
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMITTED = ROOT / jsonschema.DEFAULT_OUT
+WEB_FIXTURES = ROOT / "web" / "src" / "test" / "fixtures"
 
 
 def test_committed_schema_matches_the_models() -> None:
@@ -36,3 +41,24 @@ def test_check_flag(tmp_path: Path) -> None:
     assert main(["schema", "--check", "--out", str(out)]) == 0
     out.write_text("{}", encoding="utf-8")
     assert main(["schema", "--check", "--out", str(out)]) == 1
+
+
+MODELS = {"upcoming": Upcoming, "bout": BoutArtifact, "performance": Performance}
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(WEB_FIXTURES.glob("*.json")) if WEB_FIXTURES.exists() else [],
+    ids=lambda p: p.name,
+)
+def test_web_fixtures_are_valid_artifacts(path: Path) -> None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    MODELS[data["kind"]].model_validate(data)
+
+
+def test_web_fixtures_exist() -> None:
+    kinds = {
+        json.loads(p.read_text(encoding="utf-8"))["kind"]
+        for p in WEB_FIXTURES.glob("*.json")
+    }
+    assert kinds == set(MODELS)

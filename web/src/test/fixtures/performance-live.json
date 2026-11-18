@@ -1,0 +1,489 @@
+{
+  "schema_version": 1,
+  "generated_at": "2099-01-02T12:00:00Z",
+  "kind": "performance",
+  "model": {
+    "version": "xgboost-0000aaaa-1111bbbb",
+    "status": "synthetic",
+    "parent": "xgboost-2222cccc-3333dddd"
+  },
+  "separation": "Synthetic separation note: backtest and live are never pooled.",
+  "backtest": {
+    "label": "Backtest: synthetic",
+    "reports": "data/reports/test",
+    "commands": [
+      "uv run python -m ufc.models evaluate"
+    ],
+    "candidate_version": "xgboost-2222cccc-3333dddd",
+    "production_version": "xgboost-0000aaaa-1111bbbb",
+    "production_note": "Synthetic production note.",
+    "test_period": {
+      "candidate_version": "xgboost-2222cccc-3333dddd",
+      "first_date": "2097-01-05",
+      "last_date": "2098-12-20",
+      "n_scored": 200,
+      "n_no_result": 3,
+      "already_seen": true,
+      "already_seen_note": "synthetic already-seen note",
+      "metrics": {
+        "model": {
+          "n": 200,
+          "log_loss": 0.63,
+          "brier": 0.22,
+          "accuracy": 0.64,
+          "ece": 0.04,
+          "log_loss_low": 0.61,
+          "log_loss_high": 0.65
+        },
+        "logistic": {
+          "n": 200,
+          "log_loss": 0.635,
+          "brier": 0.222,
+          "accuracy": 0.65,
+          "ece": 0.04,
+          "log_loss_low": 0.615,
+          "log_loss_high": 0.655
+        },
+        "elo": {
+          "n": 200,
+          "log_loss": 0.68,
+          "brier": 0.24,
+          "accuracy": 0.56,
+          "ece": 0.04,
+          "log_loss_low": 0.66,
+          "log_loss_high": 0.7000000000000001
+        }
+      },
+      "calibration": [
+        {
+          "low": 0.5,
+          "high": 0.6,
+          "n": 60,
+          "mean_confidence": 0.55,
+          "favourite_win_rate": 0.56,
+          "win_rate_low": 0.5,
+          "win_rate_high": 0.6100000000000001,
+          "log_loss": 0.6
+        },
+        {
+          "low": 0.6,
+          "high": 0.7,
+          "n": 60,
+          "mean_confidence": 0.6499999999999999,
+          "favourite_win_rate": 0.6599999999999999,
+          "win_rate_low": 0.5999999999999999,
+          "win_rate_high": 0.71,
+          "log_loss": 0.6
+        },
+        {
+          "low": 0.7,
+          "high": 0.8,
+          "n": 50,
+          "mean_confidence": 0.75,
+          "favourite_win_rate": 0.76,
+          "win_rate_low": 0.7,
+          "win_rate_high": 0.81,
+          "log_loss": 0.6
+        },
+        {
+          "low": 0.8,
+          "high": 1.0,
+          "n": 30,
+          "mean_confidence": 0.9,
+          "favourite_win_rate": 0.91,
+          "win_rate_low": 0.85,
+          "win_rate_high": 0.96,
+          "log_loss": 0.6
+        }
+      ],
+      "calibration_buckets": "the favoured fighter's probability"
+    },
+    "walk_forward": {
+      "schedule": "synthetic schedule",
+      "folds": [
+        {
+          "year": 2093,
+          "in_test_period": false,
+          "n_scored": 100,
+          "metrics": {
+            "model": {
+              "n": 100,
+              "log_loss": 0.66,
+              "brier": 0.23,
+              "accuracy": 0.6,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "logistic": {
+              "n": 100,
+              "log_loss": 0.665,
+              "brier": 0.235,
+              "accuracy": 0.59,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "elo": {
+              "n": 100,
+              "log_loss": 0.68,
+              "brier": 0.24,
+              "accuracy": 0.56,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            }
+          }
+        },
+        {
+          "year": 2094,
+          "in_test_period": false,
+          "n_scored": 100,
+          "metrics": {
+            "model": {
+              "n": 100,
+              "log_loss": 0.655,
+              "brier": 0.23,
+              "accuracy": 0.6,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "logistic": {
+              "n": 100,
+              "log_loss": 0.661,
+              "brier": 0.235,
+              "accuracy": 0.59,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "elo": {
+              "n": 100,
+              "log_loss": 0.68,
+              "brier": 0.24,
+              "accuracy": 0.56,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            }
+          }
+        },
+        {
+          "year": 2095,
+          "in_test_period": false,
+          "n_scored": 100,
+          "metrics": {
+            "model": {
+              "n": 100,
+              "log_loss": 0.65,
+              "brier": 0.23,
+              "accuracy": 0.6,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "logistic": {
+              "n": 100,
+              "log_loss": 0.657,
+              "brier": 0.235,
+              "accuracy": 0.59,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "elo": {
+              "n": 100,
+              "log_loss": 0.68,
+              "brier": 0.24,
+              "accuracy": 0.56,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            }
+          }
+        },
+        {
+          "year": 2096,
+          "in_test_period": false,
+          "n_scored": 100,
+          "metrics": {
+            "model": {
+              "n": 100,
+              "log_loss": 0.645,
+              "brier": 0.23,
+              "accuracy": 0.6,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "logistic": {
+              "n": 100,
+              "log_loss": 0.653,
+              "brier": 0.235,
+              "accuracy": 0.59,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "elo": {
+              "n": 100,
+              "log_loss": 0.68,
+              "brier": 0.24,
+              "accuracy": 0.56,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            }
+          }
+        },
+        {
+          "year": 2097,
+          "in_test_period": true,
+          "n_scored": 100,
+          "metrics": {
+            "model": {
+              "n": 100,
+              "log_loss": 0.64,
+              "brier": 0.23,
+              "accuracy": 0.6,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "logistic": {
+              "n": 100,
+              "log_loss": 0.649,
+              "brier": 0.235,
+              "accuracy": 0.59,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "elo": {
+              "n": 100,
+              "log_loss": 0.68,
+              "brier": 0.24,
+              "accuracy": 0.56,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            }
+          }
+        },
+        {
+          "year": 2098,
+          "in_test_period": true,
+          "n_scored": 100,
+          "metrics": {
+            "model": {
+              "n": 100,
+              "log_loss": 0.635,
+              "brier": 0.23,
+              "accuracy": 0.6,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "logistic": {
+              "n": 100,
+              "log_loss": 0.645,
+              "brier": 0.235,
+              "accuracy": 0.59,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            },
+            "elo": {
+              "n": 100,
+              "log_loss": 0.68,
+              "brier": 0.24,
+              "accuracy": 0.56,
+              "ece": 0.04,
+              "log_loss_low": null,
+              "log_loss_high": null
+            }
+          }
+        }
+      ],
+      "pooled_before_test_period": {
+        "years": [
+          2093,
+          2096
+        ],
+        "metrics": {
+          "model": {
+            "n": 400,
+            "log_loss": 0.655,
+            "brier": 0.23,
+            "accuracy": 0.6,
+            "ece": 0.04,
+            "log_loss_low": null,
+            "log_loss_high": null
+          }
+        }
+      },
+      "pooled_test_period": {
+        "years": [
+          2097,
+          2098
+        ],
+        "metrics": {
+          "model": {
+            "n": 200,
+            "log_loss": 0.635,
+            "brier": 0.22,
+            "accuracy": 0.64,
+            "ece": 0.04,
+            "log_loss_low": null,
+            "log_loss_high": null
+          }
+        }
+      }
+    }
+  },
+  "backtest_unavailable": null,
+  "era_shift_caveat": {
+    "text": "Synthetic era-shift caveat.",
+    "backtest_years": [
+      2093,
+      2096
+    ],
+    "backtest_log_loss": 0.655,
+    "backtest_year_range": [
+      0.64,
+      0.66
+    ],
+    "test_period_log_loss": 0.635
+  },
+  "live": {
+    "label": "Live: synthetic",
+    "rules": [
+      "Synthetic rule one.",
+      "Synthetic rule two."
+    ],
+    "counts": {
+      "scored": 1,
+      "no_result": 0,
+      "pending": 1,
+      "cancelled": 0,
+      "no_live_prediction": 0,
+      "not_found": 0,
+      "unlinked": 0
+    },
+    "metrics": {
+      "n": 1,
+      "log_loss": 0.6,
+      "brier": 0.21,
+      "accuracy": 1.0,
+      "ece": 0.04,
+      "log_loss_low": null,
+      "log_loss_high": null
+    },
+    "metrics_without_limited_data": {
+      "n": 1,
+      "log_loss": 0.6,
+      "brier": 0.21,
+      "accuracy": 1.0,
+      "ece": 0.04,
+      "log_loss_low": null,
+      "log_loss_high": null
+    },
+    "by_model_version": {
+      "xgboost-0000aaaa-1111bbbb": {
+        "n": 1,
+        "log_loss": 0.6,
+        "brier": 0.21,
+        "accuracy": 1.0,
+        "ece": 0.04,
+        "log_loss_low": null,
+        "log_loss_high": null
+      }
+    },
+    "calibration": [
+      {
+        "low": 0.5,
+        "high": 0.6,
+        "n": 0,
+        "mean_confidence": null,
+        "favourite_win_rate": null,
+        "win_rate_low": null,
+        "win_rate_high": null,
+        "log_loss": null
+      },
+      {
+        "low": 0.6,
+        "high": 0.7,
+        "n": 1,
+        "mean_confidence": 0.6499999999999999,
+        "favourite_win_rate": 0.6599999999999999,
+        "win_rate_low": 0.5999999999999999,
+        "win_rate_high": 0.71,
+        "log_loss": 0.6
+      },
+      {
+        "low": 0.7,
+        "high": 0.8,
+        "n": 0,
+        "mean_confidence": null,
+        "favourite_win_rate": null,
+        "win_rate_low": null,
+        "win_rate_high": null,
+        "log_loss": null
+      },
+      {
+        "low": 0.8,
+        "high": 1.0,
+        "n": 0,
+        "mean_confidence": null,
+        "favourite_win_rate": null,
+        "win_rate_low": null,
+        "win_rate_high": null,
+        "log_loss": null
+      }
+    ],
+    "calibration_buckets": "the favoured fighter's probability",
+    "bouts": [
+      {
+        "bout_id": "wb00000000000000a1",
+        "event_key": "wp:900",
+        "event_name": "Test Fight Night: Past",
+        "event_date": "2098-12-01",
+        "fighter_a": "Lena Moss",
+        "fighter_b": "Rita Gale",
+        "status": "scored",
+        "detail": null,
+        "prediction_id": 7,
+        "model_version": "xgboost-0000aaaa-1111bbbb",
+        "predicted_at": "2098-11-28T09:00:00Z",
+        "p_fighter_a": 0.6,
+        "limited_data": false,
+        "result_bout_id": "cccccccccccccccc",
+        "outcome": "fighter_a",
+        "log_loss": 0.5108,
+        "brier": 0.16,
+        "correct": 1.0
+      },
+      {
+        "bout_id": "wb00000000000000a2",
+        "event_key": "wp:900",
+        "event_name": "Test Fight Night: Past",
+        "event_date": "2098-12-01",
+        "fighter_a": "Nora Pike",
+        "fighter_b": "Vera Lam",
+        "status": "pending",
+        "detail": null,
+        "prediction_id": 8,
+        "model_version": "xgboost-0000aaaa-1111bbbb",
+        "predicted_at": "2098-11-28T09:00:00Z",
+        "p_fighter_a": 0.45,
+        "limited_data": true,
+        "result_bout_id": null,
+        "outcome": null,
+        "log_loss": null,
+        "brier": null,
+        "correct": null
+      }
+    ]
+  }
+}
