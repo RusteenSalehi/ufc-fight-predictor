@@ -6,7 +6,7 @@
 
 Analysis only: nothing here saves a model, writes the registry or changes
 which model is live (DECISIONS D63). The base is the recipe of the M4.5
-candidate (``--eval data/reports/m45``), the recipe of the approved refit.
+candidate (``--eval data/reports/m45``), the recipe of the production refit.
 
 Evidence is kept apart as in M4.5 (``revision.py``): validation (2023 to
 2024, pipeline fitted through 2022, five seeds) and the walk-forward
@@ -72,6 +72,16 @@ PERFORMANCE: tuple[str, ...] = tuple(
 )
 VARIANTS: tuple[Variant, ...] = (Variant("base"), Variant("performance", PERFORMANCE))
 """Registered in DECISIONS D63 before any variant was run."""
+
+OVERLAP_PAIRS: tuple[tuple[str, str], ...] = (
+    ("d_deserved_career", "d_win_rate_career"),
+    ("d_deserved_l3", "d_win_rate_l3"),
+    ("d_deserved_decay", "d_win_rate_decay"),
+    ("d_perf_elo", "d_elo"),
+    ("d_luck_career", "d_win_rate_career"),
+    ("d_deserved_vs_strong", "d_opp_elo_career"),
+)
+"""Family 16 columns and their nearest existing feature, for the report."""
 
 UPPER_BOUND = 0.001
 """D63 criterion 1: the interval's upper end must be below this."""
@@ -432,6 +442,13 @@ def transform(args: argparse.Namespace) -> int:
             "n_bouts": fit.n_bouts,
             "on_grid_edge": list(fit.on_grid_edge),
         }
+
+    # Overlap with existing features, on training bouts (descriptive).
+    train_rows = build.frame[build.frame["date"] <= pd.Timestamp(SPLIT_DATES.train_end)]
+    out["training_correlations"] = {
+        f"{x}~{y}": float(train_rows[[x, y]].dropna().corr().iloc[0, 1])
+        for x, y in OVERLAP_PAIRS
+    }
 
     # Decisions: accuracy on the judged winner, by period and decision type.
     decisions = frame[frame["judged"]]
