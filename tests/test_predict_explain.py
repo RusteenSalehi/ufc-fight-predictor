@@ -31,11 +31,14 @@ from ufc.models.gbm import LIGHTGBM, XGBOOST
 from ufc.models.recipe import Recipe, fit_recipe
 from ufc.models.splits import fit_rows, labelled
 from ufc.predict.explain import (
+    COMPONENTS,
     STATS,
     TITLES,
     contributions,
     explain,
     explain_bout,
+    explain_values,
+    factors,
     group_of,
     group_totals,
     parse,
@@ -228,33 +231,126 @@ def test_template_values_are_written_from_the_favoured_side():
     why = explain(toward_a, _matchup(a, b), ("Ann Alpha", "Bea Beta"), 0.71, 0.29)
     assert why["favoured"] == "fighter_a"
     first, second = why["for"]
-    assert first["reason"] == "age_experience"
-    assert first["detail"] == (
-        "12.4 years younger (27.6 vs 40.0) and 9 fewer UFC fights (6 vs 15)"
-    )
-    assert first["log_odds"] == pytest.approx(0.5)
-    assert second["detail"].startswith("a 157-point rating edge (1,642 vs 1,485)")
-    assert "past opponents rated 85 points higher on average" in second["detail"]
+    assert first["reason"] == "age_experience" and first["component"] == "age"
+    assert first["title"] == "the age gap"
+    assert first["detail"] == "12.4 years younger (27.6 vs 40.0)"
+    assert first["log_odds"] == pytest.approx(0.5)  # the whole reason ranks it
+    assert second["component"] == "rating"
+    assert second["detail"] == "a 157-point rating edge (1,642 vs 1,485)"
     assert why["against"]["toward"] == "fighter_b"
     assert why["against"]["detail"] == "career: 4.61 vs 3.10"
     assert why["summary"] == (
         "The model favours Ann Alpha (71%). What it weighs most toward Ann Alpha: "
-        "(1) the age and experience gap, 12.4 years younger (27.6 vs 40.0) and 9 "
-        "fewer UFC fights (6 vs 15); (2) the rating gap and the opposition faced, a "
-        "157-point rating edge (1,642 vs 1,485) and past opponents rated 85 points "
-        "higher on average (1,560 vs 1,475). What it weighs most toward Bea Beta: "
-        "significant strikes landed per minute, career: 4.61 vs 3.10."
+        "(1) the age gap, 12.4 years younger (27.6 vs 40.0); (2) the rating gap, a "
+        "157-point rating edge (1,642 vs 1,485). What it weighs most toward Bea "
+        "Beta: significant strikes landed per minute, career: 4.61 vs 3.10."
     )
+
+
+def test_a_grouped_reason_shows_only_its_strongest_component():
+    # Much younger and much less experienced. Age carries the reason toward
+    # A; experience weighs slightly toward B. The text must not credit A
+    # with "19 fewer UFC fights".
+    a = {"age": 25.0, "n_fights": 4.0, "elo": 1693.0, "opp_elo_career": 1583.0}
+    b = {"age": 37.3, "n_fights": 23.0, "elo": 1850.0, "opp_elo_career": 1664.0}
+    toward_a = {
+        "d_age": 0.50,
+        "d_age_past_32": 0.20,
+        "lvl_age_rel_class": 0.05,
+        "d_n_fights": -0.10,
+        "d_cage_min": -0.05,
+        "d_elo": -0.30,
+        "d_opp_elo_career": -0.02,
+    }
+    why = explain(toward_a, _matchup(a, b), ("A", "B"), 0.56, 0.44)
+    (reason,) = why["for"]
+    assert reason["component"] == "age" and reason["title"] == "the age gap"
+    assert reason["detail"] == "12.3 years younger (25.0 vs 37.3)"
+    assert "fewer" not in why["summary"] and "UFC fights" not in why["summary"]
+    # The reason toward B: own rating carries it, not the opposition.
+    assert why["against"]["component"] == "rating"
+    assert why["against"]["detail"] == "a 157-point rating edge (1,850 vs 1,693)"
+    assert "past opponents" not in why["summary"]
+
+    # When experience carries the reason, it is the part that is shown.
+    toward_a = {"d_age": -0.05, "d_n_fights": -0.40, "d_elo": 0.1}
+    why = explain(toward_a, _matchup(a, b), ("A", "B"), 0.30, 0.70)
+    first = why["for"][0]
+    assert first["toward"] == "fighter_b" and first["component"] == "experience"
+    assert first["title"] == "UFC experience"
+    assert first["detail"] == "19 more UFC fights (23 vs 4)"
+    assert "younger" not in why["summary"] and "older" not in why["summary"]
+
+    # Opposition faced alone carries a rating reason.
+    toward_a = {"d_elo": -0.05, "d_opp_elo_l3": 0.2, "d_opp_elo_career": 0.1}
+    why = explain(toward_a, _matchup(b, a), ("B", "A"), 0.6, 0.4)
+    assert why["for"][0]["component"] == "opposition"
+    assert why["for"][0]["detail"] == (
+        "past opponents rated 81 points higher on average (1,664 vs 1,583)"
+    )
+
+
+def test_every_grouped_reason_names_a_component_that_points_its_way(
+    candidate, build, league
+):
+    """On real model output: the component a reason shows carries weight in
+    the reason's direction (never a component the model weighs against the
+    fighter) and is the largest one; only reasons with components name one."""
+    store = build.store
+    seen = 0
+    for a, b in pairs(league, n=20):
+        out, m, _ = _explained(candidate, store, a, b, ("Ann Alpha", "Bea Beta"))
+        toward_a = out["log_odds_toward_a"]
+        every = factors(toward_a, m.a, m.b, n=len(TITLES))
+        for r in every["fighter_a"] + every["fighter_b"]:
+            if r["reason"] not in COMPONENTS:
+                assert r["component"] is None
+                continue
+            seen += 1
+            s = 1.0 if r["toward"] == "fighter_a" else -1.0
+            parts = {
+                k: sum(
+                    s * toward_a[n] for n in sorted(r["inputs"]) if parse(n).stem in v
+                )
+                for k, v in COMPONENTS[r["reason"]].items()
+            }
+            assert parts[r["component"]] > 0, r
+            assert parts[r["component"]] == max(parts.values())
+    if not seen:
+        pytest.skip("this small fit gives no weight to a reason with components")
 
 
 def test_missing_values_say_so_and_an_even_bout_favours_nobody():
     a = {"age": math.nan, "n_fights": 0.0, "elo": 1500.0, "opp_elo_career": math.nan}
     b = {"age": 30.0, "n_fights": 4.0, "elo": 1530.0, "opp_elo_career": 1490.0}
-    why = explain({"d_age": 0.2, "d_elo": -0.1}, _matchup(a, b), ("A", "B"), 0.6, 0.4)
-    assert why["for"][0]["detail"].startswith("age unknown for one fighter")
-    assert "no past UFC opponents for one fighter" in why["against"]["detail"]
+    toward_a = {"d_age": 0.2, "d_opp_elo_career": -0.1}
+    why = explain(toward_a, _matchup(a, b), ("A", "B"), 0.6, 0.4)
+    assert why["for"][0]["detail"] == "age unknown for one fighter"
+    assert why["against"]["detail"] == "no past UFC opponents for one fighter"
+    # Stored values have None where the matchup had NaN.
+    stored = {
+        k: None if isinstance(v, float) and math.isnan(v) else v for k, v in a.items()
+    }
+    assert explain_values(toward_a, stored, b, ("A", "B"), 0.6, 0.4) == why
     even = explain({"d_age": 0.0}, _matchup(a, b), ("A", "B"), 0.5, 0.5)
     assert even["favoured"] is None and even["for"] == [] and even["against"] is None
+
+
+def test_factors_list_each_sides_reasons_in_the_why_wording():
+    a = {"age": 27.6, "n_fights": 6.0, "elo": 1642.0, "opp_elo_career": 1560.0}
+    b = {"age": 40.0, "n_fights": 15.0, "elo": 1485.0, "opp_elo_career": 1475.0}
+    b["slpm_career"], a["slpm_career"] = 4.61, 3.1
+    toward_a = {"d_age": 0.40, "d_n_fights": 0.10, "d_elo": 0.30, "d_slpm_career": -0.2}
+    why = explain(toward_a, _matchup(a, b), ("A", "B"), 0.71, 0.29)
+    out = factors(toward_a, a, b, n=5)
+    assert out["fighter_a"] == why["for"]
+    assert out["fighter_b"] == [why["against"]]
+    assert factors(toward_a, a, b, n=1)["fighter_a"] == why["for"][:1]
+    mirrored = factors({k: -v for k, v in toward_a.items()}, b, a, n=5)
+    flip = {"fighter_a": "fighter_b", "fighter_b": "fighter_a"}
+    for side in out:
+        for r, s in zip(out[side], mirrored[flip[side]], strict=True):
+            assert {**r, "toward": flip[r["toward"]]} == s
 
 
 def test_wording_describes_what_the_model_weighs_never_causes(candidate, build, league):

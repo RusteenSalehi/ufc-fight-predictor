@@ -15,11 +15,17 @@ No language model is involved.
    reason (``group_of``): age with UFC fight count and the age-shape
    columns; Elo with opponent quality; each per-minute or percentage stat
    with its opponent-adjusted version across every window. Otherwise inputs
-   are grouped by stat or family.
+   are grouped by stat or family. Reasons are ranked by their summed
+   contribution.
 3. **Text.** The favoured fighter (higher calibrated probability), the three
    reasons the model weighs most toward them, and the one it weighs most
    toward the other fighter. Each reason is written from the side of the
-   fighter it points toward, with both fighters' values.
+   fighter it points toward, with both fighters' values, and shows only the
+   part of the reason that contributes most in that direction: a reason
+   that sums two components (age and UFC experience; own rating and
+   opposition faced) names one of them, so the text never credits a fighter
+   with a component the model weighs against them, such as "19 fewer UFC
+   fights" inside an age reason that age alone carries (``COMPONENTS``).
 """
 
 from __future__ import annotations
@@ -129,16 +135,22 @@ STATS: dict[str, Stat] = {
     "sub_loss_rate": Stat("submission losses per fight", "pct"),
 }
 
-AGE_EXPERIENCE = {
-    "age",
-    "age_past_32",
-    "age_past_class_median",
-    "age_rel_class",
-    "n_fights",
-    "cage_min",
-    "debut",
-}
+AGE = {"age", "age_past_32", "age_past_class_median", "age_rel_class"}
+EXPERIENCE = {"n_fights", "cage_min", "debut"}
+AGE_EXPERIENCE = AGE | EXPERIENCE
 RATING = {"elo", "opp_elo"}
+COMPONENTS: dict[str, dict[str, frozenset[str]]] = {
+    "age_experience": {"age": frozenset(AGE), "experience": frozenset(EXPERIENCE)},
+    "rating": {"rating": frozenset({"elo"}), "opposition": frozenset({"opp_elo"})},
+}
+"""Reasons that sum distinct components. The text names only the component
+with the largest summed contribution in the reason's direction."""
+COMPONENT_TITLES: dict[str, str] = {
+    "age": "the age gap",
+    "experience": "UFC experience",
+    "rating": "the rating gap",
+    "opposition": "the opposition faced",
+}
 RECORD = {
     "win_rate",
     "wins",
@@ -319,51 +331,77 @@ def _diff(fav: Mapping, other: Mapping, key: str) -> float | None:
     return a - b if _finite(a) and _finite(b) else None
 
 
-def _age_experience(f: Mapping, o: Mapping) -> str:
-    parts = []
+def _age(f: Mapping, o: Mapping) -> str:
     d = _diff(f, o, "age")
-    if d is not None:
-        word = "younger" if d < 0 else "older"
-        parts.append(
-            f"{abs(d):.1f} years {word} ({f['age']:.1f} vs {o['age']:.1f})"
-            if abs(d) >= 0.05
-            else f"the same age ({f['age']:.1f})"
-        )
-    else:
-        parts.append("age unknown for one fighter")
+    if d is None:
+        return "age unknown for one fighter"
+    if abs(d) < 0.05:
+        return f"the same age ({f['age']:.1f})"
+    word = "younger" if d < 0 else "older"
+    return f"{abs(d):.1f} years {word} ({f['age']:.1f} vs {o['age']:.1f})"
+
+
+def _experience(f: Mapping, o: Mapping) -> str:
     n = _diff(f, o, "n_fights")
-    if n is not None:
-        if n == 0:
-            parts.append(f"the same number of UFC fights ({f['n_fights']:.0f})")
-        else:
-            word = "more" if n > 0 else "fewer"
-            count = abs(n)
-            plural = "fight" if count == 1 else "fights"
-            parts.append(
-                f"{count:.0f} {word} UFC {plural} ({f['n_fights']:.0f} vs "
-                f"{o['n_fights']:.0f})"
-            )
-    return " and ".join(parts)
+    if n is None:
+        return "UFC fights unknown for one fighter"
+    if n == 0:
+        return f"the same number of UFC fights ({f['n_fights']:.0f})"
+    word = "more" if n > 0 else "fewer"
+    count = abs(n)
+    plural = "fight" if count == 1 else "fights"
+    return (
+        f"{count:.0f} {word} UFC {plural} ({f['n_fights']:.0f} vs {o['n_fights']:.0f})"
+    )
 
 
-def _rating(f: Mapping, o: Mapping) -> str:
-    parts = []
+def _own_rating(f: Mapping, o: Mapping) -> str:
     d = _diff(f, o, "elo")
-    if d is not None:
-        word = "edge" if d >= 0 else "deficit"
-        parts.append(
-            f"a {abs(d):,.0f}-point rating {word} ({f['elo']:,.0f} vs {o['elo']:,.0f})"
-        )
+    if d is None:
+        return "rating unknown for one fighter"
+    word = "edge" if d >= 0 else "deficit"
+    return f"a {abs(d):,.0f}-point rating {word} ({f['elo']:,.0f} vs {o['elo']:,.0f})"
+
+
+def _opposition(f: Mapping, o: Mapping) -> str:
     q = _diff(f, o, "opp_elo_career")
-    if q is not None:
-        word = "higher" if q >= 0 else "lower"
-        parts.append(
-            f"past opponents rated {abs(q):,.0f} points {word} on average "
-            f"({f['opp_elo_career']:,.0f} vs {o['opp_elo_career']:,.0f})"
-        )
-    else:
-        parts.append("no past UFC opponents for one fighter")
-    return " and ".join(parts)
+    if q is None:
+        return "no past UFC opponents for one fighter"
+    word = "higher" if q >= 0 else "lower"
+    return (
+        f"past opponents rated {abs(q):,.0f} points {word} on average "
+        f"({f['opp_elo_career']:,.0f} vs {o['opp_elo_career']:,.0f})"
+    )
+
+
+COMPONENT_PHRASES = {
+    "age": _age,
+    "experience": _experience,
+    "rating": _own_rating,
+    "opposition": _opposition,
+}
+
+
+def top_component(group: str, members: Sequence[tuple[str, float]]) -> str | None:
+    """The component of ``group`` with the largest summed contribution
+    toward the fighter the reason points to (``members`` are (input,
+    contribution toward that fighter)); None for a reason with one
+    component. Members are summed in name order and ties go to the
+    component's key, so the mirrored bout picks the same component."""
+    parts = COMPONENTS.get(group)
+    if parts is None:
+        return None
+    totals = dict.fromkeys(parts, 0.0)
+    present: set[str] = set()
+    for name, value in sorted(members):
+        stem = parse(name).stem
+        for key, stems in parts.items():
+            if stem in stems:
+                totals[key] += value
+                present.add(key)
+    if not present:
+        raise KeyError(f"no component of {group!r} among {members}")
+    return max(sorted(present), key=lambda k: totals[k])
 
 
 def _stat_phrase(p: Parsed, f: Mapping, o: Mapping, with_label: bool = True) -> str:
@@ -410,16 +448,23 @@ def _mean(a, b):
     return (a + b) / 2 if _finite(a) and _finite(b) else None
 
 
+def title(group: str, members: Sequence[tuple[str, float]]) -> str:
+    """The reason's name; for a reason with components, the name of the
+    component the detail shows."""
+    component = top_component(group, members)
+    return TITLES[group] if component is None else COMPONENT_TITLES[component]
+
+
 def detail(
     group: str, members: Sequence[tuple[str, float]], f: Mapping, o: Mapping
 ) -> str:
     """The values behind one reason, from the side of fighter ``f``, the one
     the reason points toward. ``members`` are (input, contribution toward
-    ``f``)."""
-    if group == "age_experience":
-        return _age_experience(f, o)
-    if group == "rating":
-        return _rating(f, o)
+    ``f``). A reason with components shows only the one that contributes
+    most toward ``f`` (``top_component``)."""
+    component = top_component(group, members)
+    if component is not None:
+        return COMPONENT_PHRASES[component](f, o)
     if group == "height":
         return _cm(f, o, "height_cm", "taller", "shorter", "height")
     if group == "reach":
@@ -443,6 +488,59 @@ def _cm(f: Mapping, o: Mapping, key: str, more: str, less: str, what: str) -> st
 # --- the explanation ---------------------------------------------------------------
 
 
+def _by_group(toward_a: Mapping[str, float]) -> dict[str, list[tuple[str, float]]]:
+    by_group: dict[str, list[tuple[str, float]]] = {}
+    for name in sorted(toward_a):
+        by_group.setdefault(group_of(name), []).append((name, toward_a[name]))
+    return by_group
+
+
+def _reason(
+    group: str,
+    members_toward_a: Sequence[tuple[str, float]],
+    total_toward_a: float,
+    side: str,
+    a_vals: Mapping,
+    b_vals: Mapping,
+) -> dict:
+    """One reason written from ``side``, the fighter it points toward."""
+    s = 1.0 if side == "fighter_a" else -1.0
+    members = [(n, s * c) for n, c in members_toward_a]
+    f, o = (a_vals, b_vals) if side == "fighter_a" else (b_vals, a_vals)
+    component = top_component(group, members)
+    return {
+        "reason": group,
+        "component": component,
+        "title": title(group, members),
+        "toward": side,
+        "detail": detail(group, members, f, o),
+        "log_odds": s * total_toward_a,
+        "inputs": [n for n, _ in members_toward_a],
+    }
+
+
+def factors(
+    toward_a: Mapping[str, float],
+    a_vals: Mapping,
+    b_vals: Mapping,
+    n: int = 5,
+) -> dict[str, list[dict]]:
+    """Up to ``n`` reasons the model weighs toward each fighter, strongest
+    first, written the same way as the "why". A reason with no weight
+    toward a side is not listed for it."""
+    totals = group_totals(toward_a)
+    by_group = _by_group(toward_a)
+    out: dict[str, list[dict]] = {}
+    for side, s in (("fighter_a", 1.0), ("fighter_b", -1.0)):
+        ranked = sorted(
+            (g for g in totals if s * totals[g] > 0), key=lambda g: (-s * totals[g], g)
+        )
+        out[side] = [
+            _reason(g, by_group[g], totals[g], side, a_vals, b_vals) for g in ranked[:n]
+        ]
+    return out
+
+
 def explain(
     toward_a: Mapping[str, float],
     matchup: Matchup,
@@ -450,14 +548,27 @@ def explain(
     p_a: float,
     p_b: float,
 ) -> dict:
+    """The "why" for one bout; see ``explain_values``."""
+    return explain_values(toward_a, matchup.a, matchup.b, names, p_a, p_b)
+
+
+def explain_values(
+    toward_a: Mapping[str, float],
+    a_vals: Mapping,
+    b_vals: Mapping,
+    names: tuple[str, str],
+    p_a: float,
+    p_b: float,
+) -> dict:
     """The "why" for one bout, as JSON: the favoured side, up to three
     reasons toward them, the strongest reason toward the other fighter, and
-    a summary sentence. Swapping the fighters (contributions negated, sides
-    and names swapped, probabilities swapped) gives the mirror image."""
+    a summary sentence. ``a_vals`` and ``b_vals`` are the fighters' as-of
+    values (``Matchup.a`` and ``Matchup.b``, or the copies stored with a
+    prediction, where a missing value is None). Swapping the fighters
+    (contributions negated, sides and names swapped, probabilities swapped)
+    gives the mirror image."""
     totals = group_totals(toward_a)
-    by_group: dict[str, list[tuple[str, float]]] = {}
-    for name in sorted(toward_a):
-        by_group.setdefault(group_of(name), []).append((name, toward_a[name]))
+    by_group = _by_group(toward_a)
 
     if p_a == p_b:
         return {
@@ -472,21 +583,11 @@ def explain(
         ("fighter_a", "fighter_b") if a_fav else ("fighter_b", "fighter_a")
     )
     fav_name, other_name = names if a_fav else names[::-1]
-    fav_vals, other_vals = (matchup.a, matchup.b) if a_fav else (matchup.b, matchup.a)
     sign = 1.0 if a_fav else -1.0
 
     def reason(group: str, toward_fav: bool) -> dict:
-        s = sign if toward_fav else -sign
-        members = [(n, s * c) for n, c in by_group[group]]
-        f, o = (fav_vals, other_vals) if toward_fav else (other_vals, fav_vals)
-        return {
-            "reason": group,
-            "title": TITLES[group],
-            "toward": fav_side if toward_fav else other_side,
-            "detail": detail(group, members, f, o),
-            "log_odds": s * totals[group],
-            "inputs": [n for n, _ in by_group[group]],
-        }
+        side = fav_side if toward_fav else other_side
+        return _reason(group, by_group[group], totals[group], side, a_vals, b_vals)
 
     # Strongest first; equal weights fall back to the reason's key, which
     # does not depend on which fighter is listed first.
