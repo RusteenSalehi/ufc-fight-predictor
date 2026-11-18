@@ -241,3 +241,8 @@ artifacts/
 
 # Tool caches (uv venv and ruff cache are covered above as .venv and .ruff_cache/)
 .uv-cache/
+
+# Frontend (web/): dependencies, build output and caches
+node_modules/
+*.tsbuildinfo
+web/coverage/
