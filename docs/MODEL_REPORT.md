@@ -9,8 +9,8 @@ names the model proposed to replace it.
 The block between the GENERATED markers is rebuilt from the metrics files in `data/reports/eval/` by the
 last command below and is replaced on every run. It describes the M4 candidate. Everything above it is
 written by hand and uses only numbers from that block. The "Era-shift diagnostic", "Production refit",
-"Model revision M4.5" and "Production model after M4.5" sections after the block are also written by hand,
-each from the output of its own commands.
+"Model revision M4.5", "Production model after M4.5" and "Model revision M4.6" sections after the block are
+also written by hand, each from the output of its own commands.
 
     uv run python -m ufc.ingest fetch
     uv run python -m ufc.ingest load
@@ -990,3 +990,222 @@ schedule as M4: 2013 to 2024 pooled 0.6608 (M4 recipe 0.6619); the 2025 to 2026 
 **What changes for the site.** Little: on 2026 cards one bout in about 32 changes its pick, the average
 probability moves by about two points, and the average favourite is 1.3 points less confident. As with the current refit, the
 only out-of-sample evidence from here on is predictions published before events.
+
+
+## Model revision M4.6
+
+Written by hand on 2026-11-17 from `data/reports/m46/` (`transform.json`, `revision.json`, `ablation.json`),
+which three commands write:
+
+    uv run python -m ufc.models.revision_m46 transform
+    uv run python -m ufc.models.revision_m46 run
+    uv run python -m ufc.models.revision_m46 ablation
+
+**Question.** Results are a noisy measure of performance: a fighter can lose every exchange and land one
+knockout, a decision can be close or wrong, a draw can come from a point deduction, and opponent-quality
+features credit a fighter for facing strong opponents even when he was beaten up. Do as-of features built
+on how a fighter *performed* help the production recipe? The design, the seven columns and the adoption
+rule were registered in DECISIONS D63 and committed before any variant was run.
+
+### 0. What the data supports
+
+- **Judges' scorecards:** yes, but only as bout totals. The details text of the results file holds each
+  judge's total (for example `29 - 28`) for 4,113 of 4,169 decisions, every one from 2001 on and none
+  before. There are no per-round cards. For a decision win the totals are written loser first, so they give
+  the margin; for a draw they cannot be tied to a fighter.
+- **Point deductions:** yes, in the same text (`Point Deducted: <foul> by <surname>`), in 34 bouts, all
+  decisions, 6 of them draws.
+- **Decision type** (unanimous, split, majority): yes, as the method.
+- **Per-round stats:** yes, for every bout with stats; control time is missing before 2000.
+
+So a performance model can be fitted on decisions with the judged winner as label, and scorecards can
+check it, but not supply a per-round label.
+
+### 1. The performance model
+
+A logistic regression without intercept on A-minus-B in-fight differences, fitted on the 3,115 training
+decisions with a winner (through 2022-12-31; 3,087 with control time), both orientations, L2 with C = 1,
+not tuned (D63). Inputs are per 5 minutes with the fight counted as at least 5 minutes, plus per-round
+dominance. Weights per unit of each input (full fit, with control time):
+
+| input | weight per unit | standardised coefficient |
+|---|---:|---:|
+| significant strikes landed, per 5 min | 0.188 | 1.863 |
+| knockdowns, per 5 min | 2.094 | 0.378 |
+| takedowns landed, per 5 min | 0.447 | 0.467 |
+| submission attempts, per 5 min | 0.750 | 0.293 |
+| control minutes, per 5 min | 0.751 | 1.306 |
+| (rounds led on strikes - rounds trailed) / rounds | 0.488 | 0.357 |
+| (rounds led on control - rounds trailed) / rounds | -0.153 | -0.114 |
+
+The negative last weight is the control-minutes input taking the credit for control (the two are
+correlated); it is not a claim that leading rounds on control hurts. The performance Elo chose K 96 and a
+provisional multiplier of 1.5, inside the grid (D63).
+
+**Sanity check: does it pick the judged winner?**
+
+| decisions | bouts | accuracy | log loss |
+|---|---:|---:|---:|
+| training (in sample) | 3,115 | 84.7% | 0.349 |
+| validation 2023-2024 | 523 | 82.4% | 0.364 |
+| validation, unanimous | 404 | 88.6% | 0.258 |
+| validation, split | 112 | 58.9% | 0.758 |
+| validation, majority | 7 | 100% | 0.175 |
+| test period 2025-2026 (already seen) | 465 | 82.8% | 0.357 |
+
+Against the judges' margin on the 523 validation decisions with three cards (mean of the three judges'
+winner-minus-loser points):
+
+| mean judges' margin | bouts | accuracy | mean deserved share of the winner |
+|---|---:|---:|---:|
+| 1 point or less | 217 | 65.4% | 0.616 |
+| more than 1, up to 2 | 92 | 88.0% | 0.807 |
+| more than 2, up to 3 | 162 | 96.3% | 0.898 |
+| more than 3 | 52 | 100% | 0.969 |
+
+Correlation of the winner's deserved share with the margin: 0.524. The model is sure where the judges were
+sure and close to a coin flip where they split, which is what a measure of "who was winning" should do.
+
+**Finishes** (stats up to the stoppage; validation): the KO/TKO winner was ahead on the judges' criteria in
+94.4% of 306 bouts (mean deserved share 0.902), the submission winner in 84.9% of 185 (0.813). A finishing
+knockdown is itself a recorded knockdown, so these shares include the finishing blow.
+
+**Draws with a point deduction:** 6. In three the fighter who lost the point was clearly ahead on stats
+(deserved share 0.82, 0.94 and 0.96), the case of a draw caused by a deduction; in the other three the
+deducted fighter was behind (0.16, 0.27, 0.16).
+
+### 2. Example bouts
+
+The transform fitted through 2022; bouts from 2025 on are in the test period, already seen. These are
+descriptions of the transform for the reader to judge, not evidence for any decision.
+
+**Requested.** Both are in the data, both from UFC 319 (2025-08-16), both first-round KO/TKO wins by a
+spinning back elbow:
+
+| bout | result | stats to the stoppage | deserved share |
+|---|---|---|---|
+| Lerone Murphy vs Aaron Pico | Murphy, KO/TKO R1 3:21 | Murphy 8 significant, 1 knockdown, 1 sub attempt; Pico 13 significant, 2 takedowns, 2:01 control | Murphy **0.302**, Pico 0.698 |
+| Carlos Prates vs Geoff Neal | Prates, KO/TKO R1 4:59 | Prates 32 significant, 1 knockdown; Neal 25 significant, 0:15 control | Prates **0.979**, Neal 0.021 |
+
+Murphy's knockout came while Pico was winning the round on takedowns and control, so the model calls it a
+finish against the run of play. Prates was ahead on volume before the knockdown that ended it.
+
+**The 10 judged wins with the lowest deserved share** (likely robberies, or bouts the stats misread):
+
+| date | winner | loser | method | judges (loser - winner) | deserved share of winner |
+|---|---|---|---|---|---:|
+| 2022-02-26 | Priscila Cachoeira | Ji Yeon Kim | unanimous | 28-29 x3 | 0.010 |
+| 2020-08-01 | Nate Maness | Johnny Munoz | unanimous | 27-29 x3 | 0.011 |
+| 2013-05-25 | Mike Pyle | Rick Story | split | 29-28, 28-29, 28-29 | 0.012 |
+| 2023-12-16 | Irene Aldana | Karol Rosa | unanimous | 28-29 x3 | 0.015 |
+| 2018-02-03 | Sergio Moraes | Tim Means | split | 29-28, 28-29, 28-29 | 0.017 |
+| 2022-08-13 | Martin Buday | Lukasz Brzeski | split | 28-29, 29-28, 28-29 | 0.023 |
+| 2013-06-15 | Sean Pierson | Kenny Robertson | majority | 28-29, 28-29, 28-28 | 0.025 |
+| 2018-12-15 | Drakkar Klose | King Green | unanimous | 28-29 x3 | 0.025 |
+| 2021-05-01 | Felipe Colares | Luke Sanders | unanimous | 28-29 x3 | 0.027 |
+| 2014-06-28 | Gian Villante | Sean O'Connell | split | 28-29, 29-28, 28-29 | 0.028 |
+
+Each has the loser ahead on significant strikes, control or both (for example Story: 57 to 33 significant
+strikes and 9:29 of control against Pyle). Some will be real robberies; others will be bouts where damage
+the stats do not record (strikes that hurt, near-finishes) decided rounds. All but one are in the
+transform's own training period.
+
+**The 10 KO/TKO wins with the lowest deserved share** (likely finishes against the run of play):
+
+| date | winner | loser | end | stats to the stoppage | deserved share of winner |
+|---|---|---|---|---|---:|
+| 2013-08-17 | Travis Browne | Alistair Overeem | R1 4:08 | 14 to 41 significant; 1 knockdown to 2 | 0.000 |
+| 2012-07-11 | Andrew Craig | Rafael Natal | R2 4:52 | 23 to 73; 1 knockdown to 2 | 0.001 |
+| 2021-03-06 | Kennedy Nzechukwu | Carlos Ulberg | R2 3:19 | 82 to 146 | 0.002 |
+| 2022-03-12 | Drew Dober | Terrance McKinney | R1 3:17 | 17 to 36; 1 knockdown each | 0.003 |
+| 2018-10-06 | Derrick Lewis | Alexander Volkov | R3 4:49 | 39 to 121 | 0.005 |
+| 2010-08-07 | Stefan Struve | Christian Morecraft | R2 0:22 | 11 to 36; 0:07 to 4:44 control | 0.005 |
+| 2019-09-21 | Steven Peterson | Martin Bravo | R2 1:31 | 49 to 86 | 0.006 |
+| 2026-10-17 | Joel Faglier | Javad Mahjoub | R2 2:11 | 51 to 60; 0 knockdowns to 2 | 0.007 |
+| 2016-06-04 | Dan Henderson | Hector Lombard | R2 1:27 | 13 to 23; 1 knockdown each | 0.010 |
+| 2014-12-20 | Daniel Sarafian | Antonio Dos Santos | R2 1:01 | 24 to 37; 0 knockdowns to 1 | 0.011 |
+
+Most are well-known comebacks. The last is not a knockout: the dataset records a finger injury as a TKO,
+and the deserved share correctly says Sarafian was behind when it ended.
+
+### 3. Family 16 under the pre-registered rule
+
+`base` is the recipe of `xgboost-ed7a4d35-852c380d` (M4 recipe plus family 15, the recipe of the approved
+refit); `performance` adds the seven family 16 columns and changes nothing else. The base reproduces the
+registered candidate's validation probabilities and the saved backtest exactly (every fold, 2013 to 2026).
+
+| | base | performance | difference (95% interval) |
+|---|---:|---:|---:|
+| validation log loss, uncalibrated, mean of seeds 0-4 (**rule**) | 0.6367 | 0.6369 | +0.0002 (-0.0033 to +0.0035) |
+| validation log loss, Platt cross-validated | 0.6361 | 0.6365 | +0.0004 (-0.0036 to +0.0042) |
+| backtest 2013-2024, 5,702 bouts (**rule**) | 0.6608 | 0.6613 | +0.0005 (-0.0022 to +0.0033) |
+| secondary 2025-2026, 1,013 bouts (already seen) | 0.6210 | 0.6203 | -0.0007 (-0.0053 to +0.0041) |
+
+Per seed, the uncalibrated validation difference is -0.0010, +0.0009, -0.0004, +0.0019 and -0.0007: the
+sign depends on the seed. By backtest year the difference ranges from -0.0108 (2017) to +0.0080 (2021):
+better in 2013, 2015 to 2017 and 2024, worse in 2014 and 2018 to 2023.
+
+| criterion (D63) | result |
+|---|---|
+| 1. validation difference negative, interval's upper end below +0.001 | **no**: +0.0002, upper end +0.0035 |
+| 2. backtest 2013-2024 improves | **no**: +0.0005 |
+
+**Family 16 fails both criteria and is not recommended for adoption.**
+
+### 4. Ablation with family 16 in the model
+
+Validation log loss without the family minus with it (positive: the family helps), seeds 0 to 4, full
+model 0.6369. The M4.5 candidate's own ablation (without family 16, from `data/reports/m45/selection.json`)
+is beside it.
+
+| family | inputs | with family 16 | M4.5 candidate |
+|---|---:|---:|---:|
+| physical | 6 | -0.0000 (-0.0030 to +0.0029) | -0.0004 |
+| record | 15 | -0.0001 (-0.0019 to +0.0019) | -0.0012 |
+| striking | 30 | +0.0010 (-0.0015 to +0.0032) | +0.0007 |
+| grappling | 24 | -0.0011 (-0.0032 to +0.0010) | -0.0015 |
+| durability | 13 | -0.0002 (-0.0023 to +0.0020) | -0.0009 |
+| activity | 2 | +0.0012 (-0.0007 to +0.0030) | +0.0003 |
+| weight change | 3 | +0.0000 (-0.0006 to +0.0007) | -0.0004 |
+| opponent quality | 4 | **+0.0024 (+0.0001 to +0.0048)** | +0.0029 |
+| opponent-adjusted stats | 20 | **+0.0037 (+0.0004 to +0.0068)** | +0.0038 |
+| style matchup | 5 | +0.0000 (-0.0012 to +0.0013) | -0.0007 |
+| debut | 1 | +0.0000 (-0.0008 to +0.0009) | -0.0002 |
+| cardio | 9 | +0.0001 (-0.0008 to +0.0010) | -0.0001 |
+| rating | 1 | +0.0015 (-0.0004 to +0.0033) | +0.0009 |
+| age shape | 3 | -0.0003 (-0.0029 to +0.0021) | -0.0011 |
+| **performance (16)** | 7 | -0.0002 (-0.0035 to +0.0033) | |
+| level | 3 | +0.0002 (-0.0006 to +0.0010) | +0.0001 |
+
+Two families help with intervals that exclude zero, both with and without family 16: opponent quality and
+opponent-adjusted stats. Family 16 did not take their place. In particular, the concern that opponent
+quality credits a fighter for strong opponents who beat him up is not borne out as a weakness the model
+can fix: the weighted deserved share against strong opponents was available and opponent quality kept its
+value.
+
+### Recommendation (not applied)
+
+**Reject family 16.** It fails both criteria of the rule fixed before it was run, and nothing else points
+the other way: the calibrated validation score, the ablation and the per-seed results all put it at zero
+within noise. The columns stay in the feature table as candidates that no model reads, like family 14
+(DECISIONS D55, D64). No model was saved, nothing was refitted, and `data/models/approved.json` is
+unchanged.
+
+**Why it may not help, as a hypothesis.** The family 16 columns are not copies of existing ones (on
+training bouts the correlation of deserved share with win rate is 0.63 to 0.65 across the three windows,
+and of the performance Elo with Elo 0.63; `transform.json`, `training_correlations`). But the model already reads the stats the performance model is made of,
+per minute and opponent-adjusted, in families 3, 4 and 9. A weighted sum of those same stats adds little a
+tree model cannot build itself. This was not tested.
+
+**What the transform is good for anyway.** The deserved share is a readable, checked description of a past
+bout: it picks the judged winner in 82% of validation decisions, is confident when the judges were, and
+names the comebacks above. It could serve the site's fighter pages or the analyst as context. It is not a
+reason to change the model.
+
+**Limits.** Validation has 1,017 bouts, so differences under about 0.003 cannot be told from
+noise; the rule asks for a negative point estimate with an upper end below +0.001, which a family with a
+real but small benefit could also fail. The performance model is fitted on decisions and applied to
+finishes, where the stats cover a shorter, different kind of fight; a finishing blow counts as a
+knockdown. Damage that the stats do not record (a hurt opponent, a near-finish) is invisible to it. The
+2025 to 2026 folds and the example bouts read test-period outcomes that had been looked at before; they
+were logged and used for no decision.

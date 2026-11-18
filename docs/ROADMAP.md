@@ -57,6 +57,12 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - Adopted (D58): `age_shape` is feature family 15; candidate `xgboost-ed7a4d35-852c380d` (M4 recipe plus family 15, nothing re-tuned) and its refit `xgboost-a586af7b-609ecab1` with the rolling 2023 to 2026 calibration window. Records in `data/reports/m45/`; results in `docs/MODEL_REPORT.md`, "Production model after M4.5".
 - Open, the user's call: approve `xgboost-a586af7b-609ecab1` by editing `data/models/approved.json`.
 
+## M4.6 (Opus 5.5, high effort): model revision, not adopted
+
+- Expected-outcome ("deserved win") features. A performance model fitted on training-period decisions (label: the judged winner) scores every bout with stats; family 16 (`performance`) turns that into as-of deserved share, luck, a performance Elo and deserved share against strong opponents. Design and rule registered first (D63).
+- `uv run python -m ufc.models.revision_m46 transform`, `... run`, `... ablation`; records in `data/reports/m46/`; results in `docs/MODEL_REPORT.md`, "Model revision M4.6".
+- Outcome (D64): the transform works (82.4% of validation decisions), but family 16 fails both criteria of the rule; recommended not to adopt. Columns kept as candidates no model reads.
+
 ## M5 (Opus 5.5, high effort): done
 
 - `uv run python -m ufc.predict refresh`: the scheduled events and their cards from English Wikipedia (MediaWiki API, two to four requests, cached), fighter resolution with the ingest's rules, card changes applied whole or not at all, staleness against completed events the dataset lacks, missing attributes from fighters' infoboxes, predictions with the approved model, and a JSON dump in `data/publish/` behind the validation gate. Design choices are in DECISIONS D48 to D53.
