@@ -1,5 +1,5 @@
 """The live track record: predictions made before an event, scored once its
-results reach the dataset (DECISIONS D66).
+results reach the dataset (DECISIONS D67).
 
 Rules, applied per upcoming bout that had at least one prediction and whose
 event date is today or earlier:

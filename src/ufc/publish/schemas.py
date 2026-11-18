@@ -1,4 +1,4 @@
-"""Pydantic models of every published artifact (DECISIONS D65).
+"""Pydantic models of every published artifact (DECISIONS D66).
 
 Every artifact is validated against its model before anything is written
 (``gate.py``), and the JSON on disk is the model's own dump, so a file that

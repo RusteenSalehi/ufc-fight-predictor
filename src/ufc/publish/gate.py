@@ -1,5 +1,5 @@
 """The validation gate and the writer (docs/ARCHITECTURE.md, "Validation
-gate"; DECISIONS D65).
+gate"; DECISIONS D66).
 
 ``publish`` builds every artifact in memory, checks the card (the M5 checks
 in ``ufc.predict.publish.validate``) and validates each artifact against its

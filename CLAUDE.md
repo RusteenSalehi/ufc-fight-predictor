@@ -36,7 +36,9 @@ src/ufc/
   models/     splits with a test-period lock, baselines, XGBoost and LightGBM, calibration,
               selection, evaluation, walk-forward backtest, model registry, report, CLI
   predict/    Wikipedia client and card parsing, fighter resolution, card changes,
-              staleness, attribute backfill, predictions, JSON dump, CLI (M5)
+              staleness, attribute backfill, predictions, card checks, CLI (M5)
+  publish/    artifact schemas, bout pages, upcoming and performance JSON, the
+              validation gate, the prediction archive, live scoring (M6)
   odds/       forward odds capture from The Odds API: raw snapshots only, no matching yet (D62)
   analyst/    AI analyst backend (later)
 scripts/      one-off and operational scripts (fixture generator, reports)
@@ -63,7 +65,7 @@ Do not create `web/`, `infra/`, or `analyst/` until the roadmap reaches them.
 - `data/models/approved.json` is edited by the user only. No code and no session writes it.
 - `uv run python -m ufc.odds snapshot` makes one The Odds API call (about 2 credits) and stores the raw response in `data/odds/raw/` (gitignored). The key is `ODDS_API_KEY` in `.env`; never print or log it. It refuses below 50 remaining credits. The betting evaluation is pre-registered in `docs/ML_REQUIREMENTS.md` (D62) and must not be changed after odds results are seen.
 - `uv run python -m ufc.predict show` and `... matchup "A" "B"` are read-only (DECISIONS D60): they open the database read-only and never write `predictions` or `data/publish/`. `matchup` output is hypothetical and is never stored.
-- `uv run python -m ufc.predict refresh` reads upcoming cards from Wikipedia and predicts with the model `approved.json` names (DECISIONS D48 to D53). Without an approved model it stores cards but predicts and publishes nothing. When it reports provisional fighters or unresolved bouts, check them; a fix is an override with evidence in `src/ufc/predict/wikipedia_overrides.csv`, never fuzzy matching.
+- `uv run python -m ufc.predict refresh` reads upcoming cards from Wikipedia and predicts with the model `approved.json` names (DECISIONS D48 to D53). Without an approved model it stores cards but predicts and publishes nothing. It then publishes `data/publish/public/` (bout pages, `upcoming.json`, `performance.json` with the live record) and archive snapshots, all validated first or none written (D65 to D67). Files under `data/publish/archive/` are evidence for the live record: never edit, move or delete them. Backtest numbers in `performance.json` are copied from the evaluation record in `data/reports/` (`--reports` to point elsewhere). When it reports provisional fighters or unresolved bouts, check them; a fix is an override with evidence in `src/ufc/predict/wikipedia_overrides.csv`, never fuzzy matching.
 
 ## Hard rules
 

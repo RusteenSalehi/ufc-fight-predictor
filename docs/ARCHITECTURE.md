@@ -74,7 +74,7 @@ Known limits of the dataset, all surfaced by the validation report rather than h
 ### Upcoming cards and predictions (`src/ufc/predict/`, M5)
 
 ```
-uv run python -m ufc.predict refresh   # cards from Wikipedia, predictions, data/publish/predictions.json
+uv run python -m ufc.predict refresh   # cards from Wikipedia, predictions, the site's artifacts in data/publish/
 ```
 
 The dataset covers completed events only. Upcoming cards come from English Wikipedia through the MediaWiki API (D16, D48); ufcstats.com is never requested. One refresh:
@@ -86,7 +86,8 @@ The dataset covers completed events only. Upcoming cards come from English Wikip
 5. **Staleness** (`staleness.py`, D52): completed events after the dataset's latest; bouts with a fighter on one of them are labelled "stale stats".
 6. **Backfill** (`backfill.py`, `infobox.py`, D51): missing height, reach and date of birth from the linked article's infobox, for predictions only.
 7. **Predictions** (`predict.py`, D53): the approved model, the feature settings and fitted parameters stored with it, `build_matchup` at the event date. New rows only when inputs change.
-8. **Publish** (`publish.py`): the validation gate, then a plain JSON dump of current predictions in `data/publish/predictions.json` (the site's artifact layout is M6). Each bout carries `why`, the plain-language explanation stored with its prediction (D59).
+8. **Link** (`cards_db.py`, D67): provisional fighters on cards dated today or earlier whose name now resolves to a dataset profile, so their bouts can be scored.
+9. **Publish** (`src/ufc/publish/`, M6): the site's artifacts, built from the current predictions (`publish.snapshot`), validated whole, and written with archive snapshots, or not at all; see "Published artifacts" below.
 
 Requests: two to four per refresh (list, event pages, provisional fighters' articles, articles for backfill), one at a time, spaced, cached; see D48. Test fixtures are saved API responses (`tests/fixtures/wikipedia/`, written by `scripts/save_wikipedia_fixtures.py`); no test touches the network.
 
@@ -107,7 +108,7 @@ The schema is `src/ufc/db/schema.sql`. Deviations from the original plan are exp
 - **upcoming_bouts** (M5): bout_id (PK, `wb` + 16 hex from page ID and sorted name keys), event_key, card_order, segment, weight_class_raw, weight_class, is_title_bout, name_a/page_a, name_b/page_b, fighter_a_ref/fighter_b_ref (UFCStats ID or provisional ID; NULL when unresolved), method_a/method_b, unresolved_reason, status (`scheduled` / `cancelled`), first_seen_at, last_seen_at, cancelled_at
 - **provisional_fighters** (M5): provisional_id (PK, `wp:<article>` or `wpname:<name>`), page_title, name, fighter_id (set once linked), first_seen_at, last_seen_at, linked_at
 - **attribute_backfill** (M5): (fighter_ref, field) PK; value, source (`wikipedia`), page_title, revid, fetched_at. Never copied into `fighters`.
-- **predictions** (M5): prediction_id (PK), bout_id (upcoming_bouts), model_version, created_at, event_date, fighter_a_ref, fighter_b_ref, p_fighter_a, p_fighter_b, inputs_sha256, features_json (model inputs, flags, per-fighter values, attribute sources), shap_json (symmetrised SHAP contributions toward fighter A and the `why` explanation built from them, `explain.py`, D59; NULL for rows made before it existed), limited_data, limited_reasons_json, is_live, superseded_at, superseded_reason. At most one current (not superseded) row per bout.
+- **predictions** (M5): prediction_id (PK), bout_id (upcoming_bouts), model_version, created_at, event_date, fighter_a_ref, fighter_b_ref, p_fighter_a, p_fighter_b, inputs_sha256, features_json (model inputs, flags, per-fighter values, attribute sources), shap_json (symmetrised SHAP contributions toward fighter A and the `why` explanation built from them, `explain.py`, D59; NULL for rows made before it existed; the published `why` is re-rendered from the stored contributions and values with the current templates, D65), limited_data, limited_reasons_json, is_live (made before the event date in UTC; the live record uses the stricter rule of D67), superseded_at, superseded_reason. At most one current (not superseded) row per bout.
 - **refresh_log** (M5): seq, run_at, level, event_key, message. Append-only.
 
 Loaders are idempotent upserts keyed on UFCStats IDs: running the same load twice produces identical tables. Timestamps come from the snapshot (the upstream commit date), not the clock.
@@ -166,14 +167,24 @@ Each refresh reads upcoming events (from Wikipedia, see above) and compares with
 
 ## Validation gate
 
-Before publishing, check: event exists with a date in the future, at least one bout, every fighter ID resolved, feature vectors match the model's feature schema, probabilities in [0, 1] and summing to 1 per bout. If any check fails, log the failure, do not publish, and leave the last good artifacts in place.
+Before publishing, check: event exists with a date in the future, at least one bout, every fighter ID resolved, feature vectors match the model's feature schema, probabilities in [0, 1] and summing to 1 per bout (`ufc.predict.publish.validate`). Then every artifact is validated against its pydantic model (`ufc.publish.schemas`), and `upcoming.json` and the bout pages are checked against each other. If any check fails, log the failure, write nothing at all (no archive snapshot either), and leave the last good artifacts in place (D66).
 
-## Published artifacts (S3)
+## Published artifacts (`src/ufc/publish/`, M6)
 
-- `public/upcoming.json`: next event(s) with bouts and probabilities
-- `public/bouts/{bout_id}.json`: matchup detail, SHAP factors, analysis text
-- `public/performance.json`: backtest and live track record metrics
-- `archive/predictions/{event_id}/{timestamp}.json`: immutable snapshots, never overwritten. This is the evidence for the live track record.
+Written locally under `data/publish/` by the refresh; in production the same tree goes to S3 (M8).
+
+| Path | Contents |
+|---|---|
+| `public/upcoming.json` | scheduled events in date order; each predicted bout's probabilities, winner, model version, limited-data labels and a link to its page; unresolved bouts with the reason; the global staleness status; attribution |
+| `public/bouts/{bout_id}.json` | one predicted bout: fighters, event, weight class, calibrated probabilities and fair moneyline, model version and time, limited-data labels with reasons, the `why`, up to five factors toward each fighter, a display set of as-of stats, each fighter's last five UFC bouts with the M4.6 deserved-win probability as context, null `market` fields for M12 |
+| `public/performance.json` | the backtest (copied from the evaluation record of the approved model's candidate), the era-shift caveat, and the live record, in separate sections |
+| `archive/predictions/{event}/{timestamp}.json` | what an event's card showed at one publish; written once, read-only, never overwritten, and only when the card's content changed. The evidence for the live record |
+
+Modules: `schemas.py` (every artifact's model, `schema_version`), `artifacts.py` (bout pages, `upcoming.json`, snapshots), `history.py` (recent bouts and the deserved-win probability), `performance.py` (backtest numbers from `data/reports/`), `live.py` (live scoring), `gate.py` (build, validate, write in the order archive, bout pages, `performance.json`, `upcoming.json`).
+
+### Live record (`live.py`, D67)
+
+For each bout with a prediction whose event date has come: the latest prediction created before 10:00 UTC on the day before the event date (the event's date begins at UTC+14 then, so no bout can have started) is the live one. A bout off the card at that cut-off is `cancelled`. Once the dataset reaches the event date, the bout is matched to the completed bout between the same two dataset fighter IDs on that date; a win is scored (log loss, Brier, accuracy, a calibration table by the favourite's probability), a draw or no contest is `no result`, and `pending`, `no_live_prediction`, `not_found` and `unlinked` are counted. The record is recomputed from the database on each publish and never pooled with backtest numbers.
 
 ## Storage choices
 

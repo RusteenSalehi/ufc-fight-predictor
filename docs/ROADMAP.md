@@ -68,7 +68,15 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - `uv run python -m ufc.predict refresh`: the scheduled events and their cards from English Wikipedia (MediaWiki API, two to four requests, cached), fighter resolution with the ingest's rules, card changes applied whole or not at all, staleness against completed events the dataset lacks, missing attributes from fighters' infoboxes, predictions with the approved model, and a JSON dump in `data/publish/` behind the validation gate. Design choices are in DECISIONS D48 to D53.
 - The first live run found five veterans whose names Wikipedia spells differently; they are overrides now, and a guard leaves such a bout unresolved when the fighter's article cites a UFCStats profile in the dataset (D49).
 - Done ahead of M6: SHAP factors and a template-built "why" per bout, stored in `shap_json` and published (D59).
-- Open for M6: the S3 artifact layout and immutable archive snapshots, scoring live predictions once their events reach the dataset, and the "limited data" label on the site.
+- Open for M6 (done, below): the artifact layout and immutable archive snapshots, scoring live predictions once their events reach the dataset, and the "limited data" label on the site.
+
+## M6 (Opus 5.5): done
+
+- The refresh publishes the site's artifacts under `data/publish/` (`src/ufc/publish/`): `public/bouts/{bout_id}.json` per predicted bout, `public/upcoming.json`, `public/performance.json`, and `archive/predictions/{event}/{timestamp}.json` snapshots that are never overwritten. Every artifact has a pydantic model with a schema version; one failed check writes nothing (D66).
+- The "why" names only the strongest component of a grouped reason, and is rendered from each prediction's stored contributions at publish time (D65).
+- Live record: predictions made before 10:00 UTC on the day before the event, the latest per bout, matched to dataset results by fighter IDs and date; draws and no contests are no result (D67). Kept apart from the backtest, whose numbers are copied from the evaluation record.
+- Bout pages carry nullable market fields and a fair moneyline for M12, and each fighter's last five bouts with the M4.6 deserved-win probability as context.
+- Open for M7: the frontend reads these files; types can be generated from `ufc.publish.schemas`. S3 upload is M8.
 
 ## M2 (Sonnet 5.5, medium effort): done
 
