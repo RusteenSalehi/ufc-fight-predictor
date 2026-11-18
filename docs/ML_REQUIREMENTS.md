@@ -93,6 +93,30 @@ Each trained model is saved under `data/models/{version}/` with: model file, ord
 
 Predictions published before an event are "live" and stored as immutable snapshots. Backtest predictions are generated after the fact. They are reported separately everywhere.
 
+## Betting evaluation (pre-registered 2026-11-18, before any odds results exist; DECISIONS D62)
+
+This section is fixed. Nothing below may change after odds results are seen. A change needs a new DECISIONS entry that says what was seen first, and the original definition's results are still reported. Odds are used for evaluation only; the headline model stays stats-only (D7). This is a simulation of a rule, not betting advice (SPEC).
+
+**Reference price.** Pinnacle's `h2h` moneyline (`bookmaker.key == "pinnacle"` in The Odds API data). A bout with no Pinnacle price in its closing snapshot is excluded and counted, never replaced by another book. Other books and a consensus may be reported as separate, labelled sensitivity checks.
+
+**Card start.** The earliest `commence_time` among the card's bouts in the odds feed (the feed's start time is per bout, `docs/ODDS_SOURCES.md` section 2a).
+
+**Closing.** The last snapshot taken at or before the card start. Its price for a bout is the Pinnacle entry in that snapshot; a snapshot taken after the card start is never used. A bout whose last qualifying snapshot is more than 24 hours before the card start is excluded and counted. Bouts are matched to ours by date and name through an override file with evidence, no fuzzy matching (D17); unmatched bouts are excluded and counted.
+
+**Vig removal.** Proportional. Each fighter's implied probability is `100 / (american + 100)` for a positive price and `|american| / (|american| + 100)` for a negative price; both are divided by their sum. This is the "market probability" everywhere below.
+
+**Payout.** A $100 stake on a price `o` wins `o` if `o > 0` and `10000 / |o|` if `o < 0`, and loses $100 otherwise. A draw or no contest is a refunded stake (zero profit) and is counted separately.
+
+**Model probability.** The calibrated probability for the fighter, out of time for the model that made it: the walk-forward and test-period predictions of the candidate `approved.json` names when the evaluation is run, and for live bouts the stored immutable live prediction. Backtest and live bouts are reported separately (see "Live vs backtest"). The primary backtest sample is every bout from 2025-01-01 onward with a valid closing price; the earlier folds with a valid price are reported as a secondary table.
+
+**Strategies.** Each places a flat $100 and uses the closing price above. Each is reported on the same sample.
+
+1. **Market favourite:** bet on the fighter with the higher market probability, on every bout in the sample. A bout whose two market probabilities are exactly equal is not bet and is counted.
+2. **Model pick:** bet on the fighter the model gives more than 50%, on every bout in the sample, at that fighter's closing price.
+3. **Model edge:** bet on a fighter only when `model probability - market probability >= 0.05` (five percentage points, inclusive), at that fighter's closing price. Both fighters cannot qualify. A bout with no qualifying fighter gets no bet.
+
+**Reported for each strategy:** number of bets, total staked, total profit, ROI (`profit / staked`), hit rate, and a 95% percentile bootstrap interval of the ROI, resampling bouts with 10,000 draws and seed 0. Also reported, for the sample: the exclusion counts above, the market's own log loss and Brier score next to the model's, and the average vig removed. The threshold, stake, reference book, bootstrap settings and the headline sample are not tuned. A sweep of other thresholds or books may be shown only as a table labelled exploratory, after the headline. Results are published whatever their sign.
+
 ## V1.1: style archetypes
 
 - Soft clustering (Gaussian mixture) on as-of style rate stats, never outcomes; fit on training period only
