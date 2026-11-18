@@ -44,12 +44,13 @@ src/ufc/
 scripts/      one-off and operational scripts (fixture generator, reports)
 tests/        pytest; synthetic dataset fixtures in tests/fixtures/greco/, saved
               Wikipedia API responses in tests/fixtures/wikipedia/
-web/          frontend (later, React + TypeScript + Vite)
+web/          static frontend (M7): React + TypeScript + Vite, Tailwind, React Router, Recharts,
+              Vitest; schema/ holds the exported JSON Schema, src/types/ the generated types
 infra/        AWS CDK app in Python (later)
 data/         gitignored: external/greco snapshot, ufc.db, features/, model artifacts
 ```
 
-Do not create `web/`, `infra/`, or `analyst/` until the roadmap reaches them.
+Do not create `infra/` or `analyst/` until the roadmap reaches them.
 
 ## Models
 
@@ -66,6 +67,16 @@ Do not create `web/`, `infra/`, or `analyst/` until the roadmap reaches them.
 - `uv run python -m ufc.odds snapshot` makes one The Odds API call (about 2 credits) and stores the raw response in `data/odds/raw/` (gitignored). The key is `ODDS_API_KEY` in `.env`; never print or log it. It refuses below 50 remaining credits. The betting evaluation is pre-registered in `docs/ML_REQUIREMENTS.md` (D62) and must not be changed after odds results are seen.
 - `uv run python -m ufc.predict show` and `... matchup "A" "B"` are read-only (DECISIONS D60): they open the database read-only and never write `predictions` or `data/publish/`. `matchup` output is hypothetical and is never stored.
 - `uv run python -m ufc.predict refresh` reads upcoming cards from Wikipedia and predicts with the model `approved.json` names (DECISIONS D48 to D53). Without an approved model it stores cards but predicts and publishes nothing. It then publishes `data/publish/public/` (bout pages, `upcoming.json`, `performance.json` with the live record) and archive snapshots, all validated first or none written (D65 to D67). Files under `data/publish/archive/` are evidence for the live record: never edit, move or delete them. Backtest numbers in `performance.json` are copied from the evaluation record in `data/reports/` (`--reports` to point elsewhere). When it reports provisional fighters or unresolved bouts, check them; a fix is an override with evidence in `src/ufc/predict/wikipedia_overrides.csv`, never fuzzy matching.
+
+## Frontend
+
+- Node 24 LTS through nvm; run npm from `web/`. `npm run dev` serves the site at http://localhost:5173 and `data/publish/public/` at `/data/` (nothing is copied into `web/`). `npm run check` runs the type check, lint, Vitest and the type-drift check; run it, and `uv run pytest`, before reporting frontend work as done.
+- The site reads only the published JSON. It never computes or adjusts a probability; the one conversion it does (fair moneyline on the home page) uses the publisher's formula and is pinned by a test (D69).
+- Types in `web/src/types/artifacts.ts` are generated, never edited. After changing `ufc.publish.schemas`, run `npm run types:gen` (it calls `uv run python -m ufc.publish schema`) and commit both the schema and the types.
+- Test fixtures under `web/src/test/fixtures/` are synthetic and written by `uv run python scripts/make_web_fixtures.py`; never copy a published artifact into them (it holds real names and results).
+- No number on the site is typed by hand: metrics come from the artifacts, and any figure in page text must name the command that produces it. Keep "what the model weighs" wording; never present SHAP factors as causes.
+- Avoid source directories named `data`, `lib`, `models`, `artifacts` or `dist`: `.gitignore` ignores them at any depth.
+- Routing must keep working as a static site (D71): new routes are client-side paths without file extensions.
 
 ## Hard rules
 

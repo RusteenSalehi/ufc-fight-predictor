@@ -180,11 +180,46 @@ Written locally under `data/publish/` by the refresh; in production the same tre
 | `public/performance.json` | the backtest (copied from the evaluation record of the approved model's candidate), the era-shift caveat, and the live record, in separate sections |
 | `archive/predictions/{event}/{timestamp}.json` | what an event's card showed at one publish; written once, read-only, never overwritten, and only when the card's content changed. The evidence for the live record |
 
-Modules: `schemas.py` (every artifact's model, `schema_version`), `artifacts.py` (bout pages, `upcoming.json`, snapshots), `history.py` (recent bouts and the deserved-win probability), `performance.py` (backtest numbers from `data/reports/`), `live.py` (live scoring), `gate.py` (build, validate, write in the order archive, bout pages, `performance.json`, `upcoming.json`).
+Modules: `schemas.py` (every artifact's model, `schema_version`), `artifacts.py` (bout pages, `upcoming.json`, snapshots), `history.py` (recent bouts and the deserved-win probability), `performance.py` (backtest numbers from `data/reports/`), `live.py` (live scoring), `gate.py` (build, validate, write in the order archive, bout pages, `performance.json`, `upcoming.json`), `jsonschema.py` (the public models as one JSON Schema for the frontend's types, `uv run python -m ufc.publish schema`, D68).
 
 ### Live record (`live.py`, D67)
 
 For each bout with a prediction whose event date has come: the latest prediction created before 10:00 UTC on the day before the event date (the event's date begins at UTC+14 then, so no bout can have started) is the live one. A bout off the card at that cut-off is `cancelled`. Once the dataset reaches the event date, the bout is matched to the completed bout between the same two dataset fighter IDs on that date; a win is scored (log loss, Brier, accuracy, a calibration table by the favourite's probability), a draw or no contest is `no result`, and `pending`, `no_live_prediction`, `not_found` and `unlinked` are counted. The record is recomputed from the database on each publish and never pooled with backtest numbers.
+
+## Frontend (`web/`, M7)
+
+A static single-page site: React, TypeScript, Vite, Tailwind CSS, React Router and Recharts, tested with Vitest. It reads the three public artifacts and nothing else, has no backend, and computes no prediction (D68).
+
+```
+cd web && npm install      # once
+npm run dev                # http://localhost:5173, data served from ../data/publish/public at /data/
+npm run build              # tsc, then web/dist/ (no data inside)
+npm test                   # Vitest
+npm run check              # typecheck, lint, tests, and the type-drift check
+npm run types:gen          # after changing ufc.publish.schemas: schema, then TypeScript
+```
+
+| Route | Page | Reads |
+|---|---|---|
+| `/` | next event and its card (two-sided probability bar, pick, fair moneyline, limited-data and stale-stats labels with reasons), later events below | `upcoming.json` |
+| `/bout/{bout_id}` | probability with model version and time, the "why" and its factor chart, side-by-side as-of stats, each fighter's last five bouts with the deserved-win probability as description | `bouts/{bout_id}.json` |
+| `/performance` | backtest with the era-shift and "already seen" caveats, calibration plot, walk-forward chart, then the live record (empty state until a bout is scored) | `performance.json` |
+| `/methodology` | data sources, leakage prevention, features, models, evaluation, limitations, link to the repository | nothing |
+
+**Types.** `uv run python -m ufc.publish schema` writes `web/schema/artifacts.schema.json` from `ufc.publish.schemas`; `web/scripts/gen-types.mjs` writes `web/src/types/artifacts.ts` from it. Both are committed. `tests/test_publish_jsonschema.py` fails if the schema drifts from the models, and `web/scripts/artifact-types.test.mjs` fails if the TypeScript drifts from the schema.
+
+**Data.** `web/src/api/client.ts` fetches from `VITE_DATA_BASE_URL` (build-time, default `/data`), caches each file for the session, and refuses a file whose `kind` or `schema_version` it does not expect. In `vite` and `vite preview`, `web/vite.publish-data.ts` serves `../data/publish/public/` at `/data/` (`UFC_PUBLISH_DIR` to point elsewhere), JSON only, nothing outside that directory (D69).
+
+**Code layout.** `src/pages/` (one per route), `src/components/`, `src/api/` (fetching), `src/probability.ts`, `src/format.ts` and `src/events.ts` (pure display logic), `src/config.ts` (`SITE_NAME`, repository URL, data base URL). Names that `.gitignore` ignores anywhere in the tree (`data/`, `lib/`, `models/`, `artifacts/`, `dist/`) are not used for source directories.
+
+### Hosting requirements for M8 (S3 + CloudFront)
+
+The build is static files; the routes above exist only in the browser (D71). The distribution needs:
+
+1. **Origins.** The site build (`web/dist/`) at the root of a private S3 bucket behind Origin Access Control. The public artifacts at `/data/` on the same distribution (an S3 prefix or a second origin), so the default `VITE_DATA_BASE_URL=/data` works and no CORS is needed. If the JSON is served from another host instead, build with `VITE_DATA_BASE_URL=https://...` and allow `GET` from the site's origin in that host's CORS rules.
+2. **Deep links.** A CloudFront Function on viewer request for the default behaviour: if the URI's last segment has no file extension (`/`, `/bout/wb...`, `/performance`, `/methodology`, an unknown path), rewrite the URI to `/index.html`. Leave `/assets/*`, `/data/*` and `/favicon.svg` untouched. Do **not** use distribution-wide custom error responses that turn 403 or 404 into `/index.html` with 200: a missing `/data/bouts/{id}.json` must stay a 404 so the site can say "bout not found".
+3. **Caching.** `/assets/*` file names carry content hashes: cache for a year, `immutable`. `/index.html`: `no-cache` (revalidate every time), so a deploy is visible at once. `/data/*.json`: a short TTL (a few minutes) or an invalidation of `/data/*` after each publish, since the refresh rewrites them in place; `Content-Type: application/json`.
+4. **Order of uploads.** Data and site deploy independently. For data, keep the gate's order (D66): bout pages before `upcoming.json`, so a link on the home page never points at a missing page. For the site, upload `assets/` before `index.html`.
 
 ## Storage choices
 

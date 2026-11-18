@@ -11,7 +11,7 @@ Each milestone lists the recommended Claude Code model and effort. Milestones ru
 | M4 | Baselines, training, calibration, evaluation report | Fable 5.2 (or Opus 5.5 after the Fable window) | High |
 | M5 | Upcoming-card ingestion, card-change handling, batch prediction | Opus 5.5 | High |
 | M6 | SHAP explanations and JSON artifact publishing with validation gate | Opus 5.5 | Medium |
-| M7 | Frontend: upcoming card, matchup detail, performance, methodology | Sonnet 5.5 (Opus 5.5 for design pass) | Medium |
+| M7 | Frontend: upcoming card, matchup detail, performance, methodology (done) | Sonnet 5.5 (Opus 5.5 for design pass) | Medium |
 | M8 | AWS infrastructure with CDK (cost estimate and approval first) | Opus 5.5 | High |
 | M9 | AI analyst: pre-generated analysis, grounded chat, caps, eval set | Opus 5.5 | High |
 | M10 | CI with GitHub Actions (tests, lint, leakage and symmetry tests) | Sonnet 5.5 | Medium |
@@ -77,6 +77,13 @@ M1 was planned as a UFCStats scraper. On the first request UFCStats returned a J
 - Live record: predictions made before 10:00 UTC on the day before the event, the latest per bout, matched to dataset results by fighter IDs and date; draws and no contests are no result (D67). Kept apart from the backtest, whose numbers are copied from the evaluation record.
 - Bout pages carry nullable market fields and a fair moneyline for M12, and each fighter's last five bouts with the M4.6 deserved-win probability as context.
 - Open for M7: the frontend reads these files; types can be generated from `ufc.publish.schemas`. S3 upload is M8.
+
+## M7 (Opus 5.5): done
+
+- `web/`: a static React + TypeScript + Vite site with Tailwind CSS, React Router, Recharts and Vitest that reads only the public artifacts. Pages: home (next card with two-sided probability bars, picks, fair moneylines, limited-data and stale-stats labels with reasons, later events), matchup detail (probability with model version and time, the "why", a factor chart, side-by-side stats, last five bouts with the deserved-win probability as description), performance (backtest with its caveats, calibration plot, walk-forward chart, live record with an empty state) and methodology. Run locally with `cd web && npm install && npm run dev`.
+- Types are generated from the pydantic models through a committed JSON Schema (`uv run python -m ufc.publish schema`, then `npm run types:gen`); pytest and Vitest each fail on drift (D68). Data comes from a configurable base URL; in development Vite serves `data/publish/public/` at `/data/` without copying it (D69). Design choices in D70.
+- Node 24 LTS (nvm) on aarch64; every native package used (rolldown, Tailwind's oxide, lightningcss) ships linux-arm64 builds. TypeScript is 6.0 because typescript-eslint does not support 7 yet.
+- Open for M8: the hosting configuration the routes need (a CloudFront Function rewriting extensionless paths to `/index.html`, real 404s for `/data/*`, cache headers) is in `docs/ARCHITECTURE.md`, "Hosting requirements for M8" (D71). Branding and the site name (`SITE_NAME`, a placeholder) are deferred. `upcoming.json` could carry `fair_moneyline` so the home page reads it instead of converting (D69).
 
 ## M2 (Sonnet 5.5, medium effort): done
 
